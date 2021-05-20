@@ -105,6 +105,26 @@ class UserEntity implements ClaimSetInterface, UserEntityInterface
         $this->identifier = $id;
     }
 
+    protected function getAccountByUsername($userrole, $username): bool
+    {
+        // TODO: You can addd a conditional for another user role if necessary
+        //echo $GLOBALS['oauth_password_grant'] . '|';
+        //die();
+        if (($userrole == UuidUserAccount::USER_ROLE_PATIENT) && (($GLOBALS['oauth_password_grant'] == 2) || ($GLOBALS['oauth_password_grant'] == 3))) {
+            $auth = new AuthUtils('portal-api');
+            $id = $auth->getPatientId();
+            (new UuidRegistry(['table_name' => 'patient_data']))->createMissingUuids();
+            $uuid = sqlQueryNoLog("SELECT `uuid` FROM `patient_data` WHERE `email` = ?", [$username])['uuid'];
+            if (empty($uuid)) {
+                error_log("OpenEMR Error: unable to map uuid for patient when creating oauth password grant token");
+                return false;
+            }
+            $this->setIdentifier(UuidRegistry::uuidToString($uuid));
+            return true;
+        }
+        return false;
+    }
+
     protected function getAccountByPassword($userrole, $username, $password, $email = ''): bool
     {
         if (($userrole == UuidUserAccount::USER_ROLE_USERS) && (($GLOBALS['oauth_password_grant'] == 1) || ($GLOBALS['oauth_password_grant'] == 3))) {

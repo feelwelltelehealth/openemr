@@ -11,7 +11,7 @@
  * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
  */
 
-// Checks if the server's PHP version is compatible with OpenEMR:
+
 require_once(__DIR__ . "/../src/Common/Compatibility/Checker.php");
 $response = OpenEMR\Common\Compatibility\Checker::checkPhpVersion();
 if ($response !== true) {
@@ -249,6 +249,7 @@ if (! is_dir($GLOBALS['MPDF_WRITE_DIR'])) {
 //  library/validation/validate_core.php - Includes functions for page validation
 //  library/translation.inc.php - Includes translation functions
 require_once $GLOBALS['vendor_dir'] . "/autoload.php";
+\Sentry\init(['dsn' => 'https://7d63c1e914694c8e9eeeb9d75e5173a1@o646830.ingest.sentry.io/5759377', 'environment' => 'dev' ]);
 
 /**
  * @var Dotenv Allow a `.env` file to be read in and applied as $_SERVER variables.

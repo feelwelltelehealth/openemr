@@ -176,6 +176,10 @@ class HttpRestRouteHandler
                 $config::destroySession();
                 exit;
             }
+        } elseif(
+                ($restRequest->getResource() === 'appointment' && $restRequest->getRequestMethod() === 'GET') ||
+                ($restRequest->getResource() === 'patient' && $restRequest->getRequestMethod() === 'POST')) {
+            return;
         } elseif (($restRequest->getApiType() === 'oemr') || ($restRequest->getApiType() === 'port')) {
             // don't do any checks on our open non-fhir resources
             if (

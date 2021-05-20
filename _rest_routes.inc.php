@@ -40,6 +40,7 @@ use OpenEMR\RestControllers\InsuranceRestController;
 use OpenEMR\RestControllers\MessageRestController;
 use OpenEMR\RestControllers\PrescriptionRestController;
 use OpenEMR\RestControllers\ProcedureRestController;
+use OpenEMR\RestControllers\CalendarRestController;
 
 // Note some Http clients may not send auth as json so a function
 // is implemented to determine and parse encoding on auth route's.
@@ -1024,6 +1025,8 @@ RestConfig::$FHIR_ROUTE_MAP = array(
 
 // Note that the portal (api) route is only for patient role
 //  (there is a mechanism in place to ensure only patient role can access the portal (api) route)
+// Note that the portal (api) route is only for patient role
+//  (there is a mechanism in place to ensure only patient role can access the portal (api) route)
 RestConfig::$PORTAL_ROUTE_MAP = array(
     "GET /portal/patient" => function (HttpRestRequest $request) {
         $return = (new PatientRestController())->getOne($request->getPatientUUIDString());
@@ -1039,5 +1042,34 @@ RestConfig::$PORTAL_ROUTE_MAP = array(
         $return = (new EncounterRestController())->getOne($request->getPatientUUIDString(), $euuid);
         RestConfig::apiLog($return);
         return $return;
-    }
+    },
+    "POST /portal/patient" => function () {
+        $data = (array) (json_decode(file_get_contents("php://input")));
+
+        $return = (new PatientRestController())->portalCreate($data);
+        RestConfig::apiLog($return);
+        return $return;
+    },
+    "GET /portal/appointment" => function () {
+        //echo "BB";
+        //die();
+        $return = (new CalendarRestController())->getOpenAppointments($_GET);
+        RestConfig::apiLog($return);
+        return $return;
+    },
+    "GET /portal/patient/appointment" => function (HttpRestRequest $request) {
+        $pid = $request->getRequestUser()['pid'];
+        //RestConfig::authorization_check("patients", "appt");
+        $return = (new AppointmentRestController())->getAllForPatient($pid);
+        RestConfig::apiLog($return);
+        return $return;
+    },
+    "POST /portal/patient/appointment" => function (HttpRestRequest $request) {
+        $pid = $request->getRequestUser()['pid'];
+        //RestConfig::authorization_check("patients", "appt");
+        $data = (array) (json_decode(file_get_contents("php://input")));
+        $return = (new AppointmentRestController())->post($pid, $data);
+        RestConfig::apiLog($return, $data);
+        return $return;
+    },
 );

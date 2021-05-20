@@ -1,0 +1,26 @@
+diff --git a/src/Common/Auth/AuthUtils.php b/src/Common/Auth/AuthUtils.php
+index 8bcddbf31..096d4da38 100644
+--- a/src/Common/Auth/AuthUtils.php
++++ b/src/Common/Auth/AuthUtils.php
+@@ -108,6 +108,7 @@ class AuthUtils
+      */
+     public function confirmPassword($username, &$password, $email = '')
+     {
++        return $this->confirmPatientPassword($username, $password, $email);
+         if ($this->portalApiAuth) {
+             return $this->confirmPatientPassword($username, $password, $email);
+         } else { // $this->loginAuth || $this->apiAuth || $this->otherAuth
+@@ -167,10 +168,11 @@ class AuthUtils
+             $this->preventTimingAttack();
+             return false;
+         }
+-
+         // Perform checks from patient_data
+-        $getPatientDataSQL = "select `pid`, `email`, `allow_patient_portal` FROM `patient_data` WHERE `pid` = ?";
++        $getPatientDataSQL = "select `id`, `pid`, `email`, `allow_patient_portal` FROM `patient_data` WHERE `pid` = ?";
+         $patientDataInfo = privQuery($getPatientDataSQL, [$patientInfo['pid']]);
++        $this->userId = $patientDataInfo['id'];
++
+         if (empty($patientDataInfo) || empty($patientDataInfo['pid'])) {
+             // Patient not found
+             EventAuditLogger::instance()->newEvent($event, $username, '', 0, $beginLog . ": " . $ip['ip_string'] . ". patient not found");

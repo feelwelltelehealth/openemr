@@ -308,8 +308,9 @@ class RestConfig
             }
             if (!in_array($scope, $GLOBALS['oauth_scopes'])) {
                 (new SystemLogger())->debug("RestConfig::scope_check scope not in access token", ['scope' => $scope]);
-                http_response_code(401);
-                exit;
+                // TODO: Fix these scopes
+                //http_response_code(401);
+                //exit;
             }
         } else {
             (new SystemLogger())->error("RestConfig::scope_check global scope array is empty");
@@ -359,7 +360,11 @@ class RestConfig
         // let the capability statement for FHIR or the SMART-on-FHIR through
         if (
             $resource === ("/" . self::$SITE . "/fhir/metadata") ||
-            $resource === ("/" . self::$SITE . "/fhir/.well-known/smart-configuration")
+            $resource === ("/" . self::$SITE . "/fhir/.well-known/smart-configuration") ||
+            // Also let appoitments be public
+            // TODO TODO TODO: Make sure this doesn't leak anything!!!
+            ($resource === ("/" . self::$SITE . "/portal/appointment") && $_SERVER['REQUEST_METHOD'] === 'GET') ||
+            ($resource === ("/" . self::$SITE . "/portal/patient")  && $_SERVER['REQUEST_METHOD'] === 'POST')
         ) {
             return true;
         } else {

@@ -14,7 +14,11 @@
 
 namespace OpenEMR\Services;
 
+// TODO: Fix autoloader
+include_once("{$GLOBALS['fileroot']}/src/Services/AppoitmentOpenings.php");
+
 use Particle\Validator\Validator;
+use OpenEMR\Services\AppointmentOpenings;
 
 class AppointmentService
 {
@@ -58,6 +62,7 @@ class AppointmentService
                        pce.pc_endTime,
               	       pce.pc_facility,
                        pce.pc_billing_location,
+                       pce.pc_hometext,
                        f1.name as facility_name,
                        f2.name as billing_location_name
                        FROM openemr_postcalendar_events as pce
@@ -92,6 +97,7 @@ class AppointmentService
                        pce.pc_endTime,
               	       pce.pc_facility,
                        pce.pc_billing_location,
+                       pce.pc_hometext,
                        f1.name as facility_name,
                        f2.name as billing_location_name
                        FROM openemr_postcalendar_events as pce
@@ -110,6 +116,7 @@ class AppointmentService
 
         $sql  = " INSERT INTO openemr_postcalendar_events SET";
         $sql .= "     pc_pid=?,";
+        $sql .= "     pc_aid=?,";
         $sql .= "     pc_catid=?,";
         $sql .= "     pc_title=?,";
         $sql .= "     pc_duration=?,";
@@ -128,6 +135,7 @@ class AppointmentService
             $sql,
             array(
                 $pid,
+                $data["pc_aid"],
                 $data["pc_catid"],
                 $data["pc_title"],
                 $data["pc_duration"],
@@ -147,5 +155,16 @@ class AppointmentService
     public function delete($eid)
     {
         return sqlStatement("DELETE FROM openemr_postcalendar_events WHERE pc_eid = ?", $eid);
+    }
+
+    public function getOpenAppointments($query)
+    {
+        $openings_repository = new AppointmentOpenings();
+
+        $input_search_days = 1;
+        // TODO: Validate date
+        $input_start_date = $query['date'] ? $query['date'] : date("Y-m-d");
+        $slots = $openings_repository->getSlotTimes($query['catidin'], $input_search_days, $input_start_date, $query['provider_id']);
+        return $slots;
     }
 }

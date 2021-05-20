@@ -181,6 +181,7 @@ if ($isLocalApi) {
     if (!$gbl->authenticateUserToken($tokenId, $clientId, $userId)) {
         $logger->error("dispatch.php api call with invalid token");
         $gbl::destroySession();
+        echo "A";
         http_response_code(401);
         exit();
     }
@@ -220,6 +221,7 @@ if ($isLocalApi) {
     ) {
         $logger->error("dispatch.php api call with token that does not cover the requested route");
         $gbl::destroySession();
+        echo 'G';
         http_response_code(401);
         exit();
     }

@@ -37,6 +37,24 @@ class UserRepository extends UserEntity implements UserRepositoryInterface
         return false;
     }
 
+    public function getCustomUserEntityByUsername(
+            $userrole,
+            $username,
+            $email,
+            $grantType,
+            ClientEntityInterface $clientEntity
+        ) {
+            $user = new UserEntity();
+            if (!empty($userrole) && !empty($username)) {
+                if (!$user->getAccountByUsername($userrole, $username)) {
+                    return false;
+                }
+
+                return $user;
+            }
+            return false;
+        }
+
     public function getUserEntityByUserCredentials(
         $username,
         $password,

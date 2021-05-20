@@ -37,6 +37,7 @@ use OpenEMR\Common\Auth\OpenIDConnect\Entities\ScopeEntity;
 use OpenEMR\Common\Auth\OpenIDConnect\Entities\UserEntity;
 use OpenEMR\Common\Auth\OpenIDConnect\Grant\CustomClientCredentialsGrant;
 use OpenEMR\Common\Auth\OpenIDConnect\Grant\CustomPasswordGrant;
+use OpenEMR\Common\Auth\OpenIDConnect\Grant\CustomNewUserGrant;
 use OpenEMR\Common\Auth\OpenIDConnect\Grant\CustomRefreshTokenGrant;
 use OpenEMR\Common\Auth\OpenIDConnect\IdTokenSMARTResponse;
 use OpenEMR\Common\Auth\OpenIDConnect\Repositories\AccessTokenRepository;
@@ -122,6 +123,7 @@ class AuthorizationController
         // verify and/or setup our key pairs.
         $this->privateKey = $GLOBALS['OE_SITE_DIR'] . '/documents/certificates/oaprivate.key';
         $this->publicKey = $GLOBALS['OE_SITE_DIR'] . '/documents/certificates/oapublic.key';
+        // die();
         $this->configKeyPairs();
         // true will display client/user server sign in. false, not.
         $this->providerForm = $providerForm;
@@ -693,10 +695,17 @@ class AuthorizationController
         }
         // TODO: break this up - throw exception for not turned on.
         if (!empty($GLOBALS['oauth_password_grant']) && ($this->grantType === self::GRANT_TYPE_PASSWORD)) {
-            $grant = new CustomPasswordGrant(
-                new UserRepository(),
-                new RefreshTokenRepository()
-            );
+            if ($this->new_user) {
+                $grant = new CustomNewUserGrant(
+                    new UserRepository(),
+                    new RefreshTokenRepository()
+                );
+            } else {
+                    $grant = new CustomPasswordGrant(
+                        new UserRepository(),
+                        new RefreshTokenRepository()
+                    );
+            }
             $grant->setRefreshTokenTTL(new DateInterval('P3M'));
             $authServer->enableGrantType(
                 $grant,
@@ -1072,6 +1081,63 @@ class AuthorizationController
             $body = $response->getBody();
             $body->write($exception->getMessage());
             $this->emitResponse($response->withStatus(500)->withBody($body));
+        }
+    }
+
+    public function getTokenForNewUser()
+    {
+        $this->logger->debug("AuthorizationController->oauthAuthorizeToken() starting request");
+        $response = $this->createServerResponse();
+        $psr17Factory = new Psr17Factory();
+        $request = (new ServerRequestCreator(
+            $psr17Factory, // ServerRequestFactory
+            $psr17Factory, // UriFactory
+            $psr17Factory, // UploadedFileFactory
+            $psr17Factory  // StreamFactory
+        ))->fromArrays($_SERVER, [], [], [], $_POST);
+        // authorization code which is normally only sent for new tokens
+        // by the authorization grant flow.
+        $code = $request->getParsedBody()['code'] ?? null;
+        // grantType could be authorization_code, password or refresh_token.
+        $this->grantType = $request->getParsedBody()['grant_type'];
+
+        // Finally time to init the server.
+        $this->new_user = true;
+        $server = $this->getAuthorizationServer();
+        try {
+            $result = $server->respondToAccessTokenRequest($request, $response);
+            // save a password trusted user
+            if ($this->grantType === 'password') {
+                $body = $result->getBody();
+                $body->rewind();
+                // yep, even password grant gets one. could be useful.
+                $code = json_decode($body->getContents(), true, 512, JSON_THROW_ON_ERROR)['id_token'];
+                unset($_SESSION['csrf_private_key']); // gotta remove since binary and will break json_encode (not used for password granttype, so ok to remove)
+                $session_cache = json_encode($_SESSION, JSON_THROW_ON_ERROR);
+                $this->saveTrustedUser($_REQUEST['client_id'], $_SESSION['pass_user_id'], $_REQUEST['scope'], 0, $code, $session_cache, 'password');
+            }
+            //SessionUtil::oauthSessionCookieDestroy();
+            //$this->logger->debug("done");
+            return $result;
+            //$this->emitResponse($result);
+        } catch (OAuthServerException $exception) {
+            $this->logger->debug(
+                "AuthorizationController->oauthAuthorizeToken() OAuthServerException occurred",
+                ["message" => $exception->getMessage(), "stack" => $exception->getTraceAsString()]
+            );
+            return $exception->getMessage();
+            //SessionUtil::oauthSessionCookieDestroy();
+            //$this->emitResponse($exception->generateHttpResponse($response));
+        } catch (Exception $exception) {
+            $this->logger->error(
+                "AuthorizationController->oauthAuthorizeToken() Exception occurred",
+                ["message" => $exception->getMessage()]
+            );
+            SessionUtil::oauthSessionCookieDestroy();
+            $body = $response->getBody();
+            return $body;
+            //$body->write($exception->getMessage());
+            //$this->emitResponse($response->withStatus(500)->withBody($body));
         }
     }
 

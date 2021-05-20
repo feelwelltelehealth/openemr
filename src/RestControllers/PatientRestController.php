@@ -14,6 +14,23 @@ namespace OpenEMR\RestControllers;
 
 use OpenEMR\RestControllers\RestControllerHelper;
 use OpenEMR\Services\PatientService;
+use OpenEMR\Common\Auth\OpenIDConnect\IdTokenSMARTResponse;
+use OpenEMR\Common\Auth\OpenIDConnect\Repositories\IdentityRepository;
+use OpenIDConnectServer\ClaimExtractor;
+use OpenEMR\Common\Auth\OpenIDConnect\Repositories\ScopeRepository;
+use OpenIDConnectServer\Entities\ClaimSetEntity;
+use OpenEMR\RestControllers\AuthorizationController;
+use League\OAuth2\Server\Grant\PasswordGrant;
+use OAuth2ServerExamples\Repositories\RefreshTokenRepository;
+use OAuth2ServerExamples\Repositories\UserRepository;
+use OpenEMR\Common\Csrf\CsrfUtils;
+use OpenEMR\Common\Auth\OpenIDConnect\Entities\ScopeEntity;
+
+//use League\OAuth2\Server\Repositories\UserRepositoryInterface;
+//use League\OAuth2\Server\Repositories\RefreshTokenRepositoryInterface;
+
+require_once("../portal/account/account.lib.php");
+require_once("../library/pnotes.inc");
 
 class PatientRestController
 {
@@ -43,6 +60,40 @@ class PatientRestController
     public function __construct()
     {
         $this->patientService = new PatientService();
+    }
+
+    /**
+     * Like an normal patien post except we add some anti-spam layers
+     * and return a token
+     * @param $data - array of patient fields.
+     * @return a 201/Created status code and a JWT token for the newly created user.
+     */
+    public function portalCreate($data)
+    {
+        // TODO: Add re-captcha
+        // TODO: Make sure the email is unique!!!
+        $data['allow_patient_portal'] = "YES";
+        $processingResult = $this->patientService->insert($data);
+        $user = $processingResult->getData();
+        $pid = $user[0]['pid'];
+        // doCredentials
+        $creds = doCredentials($pid);
+        CsrfUtils::setupCsrfKey();
+        $_SESSION['csrf'] = 'temp';
+        $_POST['username'] = $data['email'];
+        $_POST['password'] = 'temp';
+        $_POST['grant_type'] = 'password';
+        $_POST['client_id'] = 'sW4GKinOfQa0XucXHBZ0y-s5xlO0Mts02STzrdn2ofg';
+
+        $_POST['scope'] = 'api:oemr api:port patient/encounter.read user/encounter.write api:fhir';
+        $_SESSION['scopes'] = $_POST['scope'];
+
+        $_POST['user_role'] = 'patient';
+        $_POST['email'] = $data['email'];
+        $authServer = new AuthorizationController();
+        $token_response = $authServer->getTokenForNewUser();
+        $token = json_decode($token_response->getBody());
+        return ['token' => $token];
     }
 
     /**

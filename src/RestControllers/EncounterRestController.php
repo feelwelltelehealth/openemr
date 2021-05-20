@@ -40,6 +40,7 @@ class EncounterRestController
      */
     public function post($puuid, $data)
     {
+        // echo "AAA " . $puuid;
         $processingResult = $this->encounterService->insertEncounter($puuid, $data);
         return RestControllerHelper::handleProcessingResult($processingResult, 201);
     }
