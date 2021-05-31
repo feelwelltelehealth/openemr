@@ -65,6 +65,8 @@ services:
       OPENEMR_SETTING_couchdb_ssl_allow_selfsigned: 1
       OPENEMR_SETTING_gbl_ldap_host: 'ldap://openldap:389'
       OPENEMR_SETTING_gbl_ldap_dn: 'cn={login},dc=example,dc=org'
+      STRIPE_SECRET_KEY: 'sk_test_51Hw9gxLoc1rq1TeBrFbgGIN43r3mHo8sxsljUBOEiYqjC8tPVRmE1QJZ9RywWV5dBTdPuWtWQIf1XvSkxnN9SU5Y00toquzjR5'
+      STRIPE_PUBLISHABLE_KEY: 'pk_test_51Hw9gxLoc1rq1TeBMDkgsOFH6pTPvffzfWwizNx0Svy7WYOtHD3rEUberKsiOGOqciEojE85x3DjssvzyzV95c8X00e8VhfLNl'
     depends_on:
     - mysql
   phpmyadmin:

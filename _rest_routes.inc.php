@@ -41,6 +41,7 @@ use OpenEMR\RestControllers\MessageRestController;
 use OpenEMR\RestControllers\PrescriptionRestController;
 use OpenEMR\RestControllers\ProcedureRestController;
 use OpenEMR\RestControllers\CalendarRestController;
+use OpenEMR\RestControllers\PaymentRestController;
 
 // Note some Http clients may not send auth as json so a function
 // is implemented to determine and parse encoding on auth route's.
@@ -1069,6 +1070,14 @@ RestConfig::$PORTAL_ROUTE_MAP = array(
         //RestConfig::authorization_check("patients", "appt");
         $data = (array) (json_decode(file_get_contents("php://input")));
         $return = (new AppointmentRestController())->post($pid, $data);
+        RestConfig::apiLog($return, $data);
+        return $return;
+    },
+    "POST /portal/patient/payment" => function (HttpRestRequest $request) {
+        $pid = $request->getRequestUser()['pid'];
+        //RestConfig::authorization_check("patients", "appt");
+        $data = (array) (json_decode(file_get_contents("php://input")));
+        $return = (new PaymentRestController())->post($pid, $data);
         RestConfig::apiLog($return, $data);
         return $return;
     },
