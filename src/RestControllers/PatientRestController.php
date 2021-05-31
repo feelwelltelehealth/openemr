@@ -83,7 +83,7 @@ class PatientRestController
         $_POST['username'] = $data['email'];
         $_POST['password'] = 'temp';
         $_POST['grant_type'] = 'password';
-        $_POST['client_id'] = 'sW4GKinOfQa0XucXHBZ0y-s5xlO0Mts02STzrdn2ofg';
+        $_POST['client_id'] = $data['client_id'];
 
         $_POST['scope'] = 'api:oemr api:port patient/encounter.read user/encounter.write api:fhir';
         $_SESSION['scopes'] = $_POST['scope'];
