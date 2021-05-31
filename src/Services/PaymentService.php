@@ -63,7 +63,7 @@ class PaymentService
             "amount" => $data['amount'], // 2000,
             "currency" => "usd",
             "payment_method" => $data['token'], // "tok_visa", // obtained with Stripe.js
-            "metadata" => ["order_id" => "6735"]
+            // "metadata" => ["order_id" => "6735"]
         ]);
 
         // echo 'status: ' . $intent->status; Should be requires_confirmation at this point
