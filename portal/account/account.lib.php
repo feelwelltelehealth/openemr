@@ -256,3 +256,103 @@ function doCredentials($pid)
 
     return $sent;
 }
+
+
+function doCredentialsAuthorized($pid)
+{
+    global $srcdir;
+
+    $newpd = sqlQuery("SELECT id,fname,mname,lname,email,email_direct, providerID FROM `patient_data` WHERE `pid`=?", array($pid));
+    $user = sqlQueryNoLog("SELECT users.username FROM users WHERE authorized = 1 And id = ?", array($newpd['providerID']));
+
+
+    $crypto = new CryptoGen();
+    $uname = $newpd['fname'] . $newpd['id'];
+    // Token expiry 1 hour
+    $expiry = new DateTime('NOW');
+    $expiry->add(new DateInterval('PT01H'));
+
+    $clear_pass = RandomGenUtils::generatePortalPassword();
+    $token_new = RandomGenUtils::createUniqueToken(32);
+    $pin = RandomGenUtils::createUniqueToken(6);
+
+    // Will send a link to user with encrypted token
+    $token = $crypto->encryptStandard($token_new);
+    if (empty($token)) {
+        // Serious issue if this is case, so die.
+        error_log('OpenEMR Error : Portal token encryption broken - exiting');
+        die();
+    }
+    $encoded_link = sprintf("%s?%s", attr($GLOBALS['portal_onsite_two_address']), http_build_query([
+        'forward' => $token,
+        'site' => $_SESSION['site_id']
+    ]));
+
+    // Will store unencrypted token in database with the pin and expiration date
+    $one_time = $token_new . $pin . bin2hex($expiry->format('U'));
+    $res = sqlStatement("SELECT * FROM patient_access_onsite WHERE pid=?", array($pid));
+    $query_parameters = array($uname, null);
+    $newHash = (new AuthHash('auth'))->passwordHash($clear_pass);
+    if (empty($newHash)) {
+        // Something is seriously wrong
+        error_log('OpenEMR Error : OpenEMR is not working because unable to create a hash.');
+        die("OpenEMR Error : OpenEMR is not working because unable to create a hash.");
+    }
+    array_push($query_parameters, $newHash);
+    array_push($query_parameters, $pid);
+    if (sqlNumRows($res)) {
+        sqlStatementNoLog("UPDATE patient_access_onsite SET portal_username=?,portal_onetime=?,portal_pwd=?,portal_pwd_status=1 WHERE pid=?", $query_parameters);
+    } else {
+        sqlStatementNoLog("INSERT INTO patient_access_onsite SET portal_username=?,portal_onetime=?,portal_pwd=?,portal_pwd_status=1,pid=?", $query_parameters);
+    }
+
+    if (!validEmail($newpd['email_direct'])) {
+        if (validEmail($newpd['email'])) {
+            $newpd['email_direct'] = $newpd['email'];
+        }
+    }
+
+    $message = messageCreate($uname, $pin, $encoded_link);
+
+    $mail = new MyMailer();
+    $pt_name = text($newpd['fname'] . ' ' . $newpd['lname']);
+    $pt_email = text($newpd['email_direct']);
+    $email_subject = xlt('Access Your Patient Portal');
+    $email_sender = $GLOBALS['patient_reminder_sender_email'];
+    $mail->AddReplyTo($email_sender, $email_sender);
+    $mail->SetFrom($email_sender, $email_sender);
+    $mail->AddAddress($pt_email, $pt_name);
+    $mail->Subject = $email_subject;
+    $mail->MsgHTML("<html><body><div class='wrapper'>" . $message . "</div></body></html>");
+    $mail->IsHTML(true);
+    $mail->AltBody = $message;
+
+    if ($mail->Send()) {
+        $sent = 1;
+    } else {
+        $email_status = $mail->ErrorInfo;
+        $errorMsg = "EMAIL ERROR: " . errorLogEscape($email_status) . '<br />';
+        if ($newpd['id']) {
+            $errorMsg .= xlt("Your account has been successfully created however, we were unable to send the account information.");
+            $errorMsg .= "<br />" . xlt("Please contact your providers office with the following account information") . ":<br />";
+            $errorMsg1 = xlt("Account Id") . ": " . $uname . " " . xlt("MRN Reference") . ": " . $pid;
+            $errorMsg .= $errorMsg1;
+            $errorMsg .= "<br /><br />" . xlt("The providers office has been notified. Thank you.") . "<br />";
+            // notify admin of failure.
+            $title = xlt("Failed Registration");
+            $admin_msg = "\n" . xlt("A new patients credentials could not be sent after portal registration.");
+            $admin_msg .= "\n" . $errorMsg1;
+            $admin_msg .= "\n" . xlt("Please follow up.");
+            // send note
+            addPnote($pid, $admin_msg, 1, 1, $title, $user['username'], '', 'New');
+        } else {
+            $errorMsg .= "<br />" . xlt("We were unable to create an account.") . "<br />";
+            $errorMsg .= xlt("Please try again or contact the providers office for further assistance.");
+        }
+        error_log("Portal Registration error: " . errorLogEscape($errorMsg), 0);
+
+        return $errorMsg;
+    }
+
+    return $sent;
+}

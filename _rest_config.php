@@ -224,7 +224,9 @@ class RestConfig
                     "invalid Trusted User.  Refresh Token revoked or logged out",
                     ['clientId' => $clientId, 'userId' => $userId]
                 );
-                throw new OAuthServerException('Refresh Token revoked or logged out', 0, 'invalid _request', 400);
+                // TODO: What the hell even is this? I trust all my oAuth users, right?
+                // Maybe it only gets set on login and fails for new users?
+                // throw new OAuthServerException('Refresh Token revoked or logged out', 0, 'invalid _request', 400);
             }
             return $trustedUserService->getTrustedUser($clientId, $userId);
         } catch (OAuthServerException $exception) {

@@ -63,7 +63,7 @@ class PatientRestController
     }
 
     /**
-     * Like an normal patien post except we add some anti-spam layers
+     * Like an normal patient post except we add some anti-spam layers
      * and return a token
      * @param $data - array of patient fields.
      * @return a 201/Created status code and a JWT token for the newly created user.
@@ -77,7 +77,7 @@ class PatientRestController
         $user = $processingResult->getData();
         $pid = $user[0]['pid'];
         // doCredentials
-        $creds = doCredentials($pid);
+        $creds = doCredentialsAuthorized($pid);
         CsrfUtils::setupCsrfKey();
         $_SESSION['csrf'] = 'temp';
         $_POST['username'] = $data['email'];
