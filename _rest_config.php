@@ -366,7 +366,8 @@ class RestConfig
             // Also let appoitments be public
             // TODO TODO TODO: Make sure this doesn't leak anything!!!
             ($resource === ("/" . self::$SITE . "/portal/appointment") && $_SERVER['REQUEST_METHOD'] === 'GET') ||
-            ($resource === ("/" . self::$SITE . "/portal/patient")  && $_SERVER['REQUEST_METHOD'] === 'POST')
+            ($resource === ("/" . self::$SITE . "/portal/patient")  && $_SERVER['REQUEST_METHOD'] === 'POST') ||
+            ($resource === ("/" . self::$SITE . "/portal/patient/password_reset") && ($_SERVER['REQUEST_METHOD'] === 'POST' || $_SERVER['REQUEST_METHOD'] === 'GET' ))
         ) {
             return true;
         } else {

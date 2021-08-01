@@ -15,7 +15,7 @@
 namespace OpenEMR\Services;
 
 // TODO: Fix autoloader
-include_once("{$GLOBALS['fileroot']}/src/Services/AppoitmentOpenings.php");
+include_once("{$GLOBALS['fileroot']}/src/Services/AppointmentOpenings.php");
 
 use Particle\Validator\Validator;
 use OpenEMR\Services\AppointmentOpenings;

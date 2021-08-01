@@ -42,6 +42,7 @@ use OpenEMR\RestControllers\PrescriptionRestController;
 use OpenEMR\RestControllers\ProcedureRestController;
 use OpenEMR\RestControllers\CalendarRestController;
 use OpenEMR\RestControllers\PaymentRestController;
+use OpenEMR\RestControllers\PasswordController;
 
 // Note some Http clients may not send auth as json so a function
 // is implemented to determine and parse encoding on auth route's.
@@ -1078,6 +1079,25 @@ RestConfig::$PORTAL_ROUTE_MAP = array(
         //RestConfig::authorization_check("patients", "appt");
         $data = (array) (json_decode(file_get_contents("php://input")));
         $return = (new PaymentRestController())->post($pid, $data);
+        RestConfig::apiLog($return, $data);
+        return $return;
+    },
+    "POST /portal/patient/password_reset" => function (HttpRestRequest $request) {
+        //RestConfig::authorization_check("patients", "appt");
+        $data = (array) (json_decode(file_get_contents("php://input")));
+        if ($data['otc']) {
+            $return = (new PasswordController())->changePassword($data);
+            return $return;
+        }
+        $return = (new PasswordController())->requestReset($data['email']);
+        RestConfig::apiLog($return, $data);
+        return $return;
+    },
+    "GET /portal/patient/password_reset" => function (HttpRestRequest $request) {
+        //RestConfig::authorization_check("patients", "appt");
+        $otc = $_GET['otc'];
+        // $data = (array) (json_decode(file_get_contents("php://input")));
+        $return = (new PasswordController())->verifyOtc($otc);
         RestConfig::apiLog($return, $data);
         return $return;
     },

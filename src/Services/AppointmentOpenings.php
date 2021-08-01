@@ -21,7 +21,7 @@ function sqlDateTime($timestamp) {
     return $edate = date("Y-m-d H:i:s", $intTimeStamp);
 }
 /**
- * Finding Appoitment Opening for Scheduling
+ * Finding Appointment Opening for Scheduling
  *
  * @package OpenEMR\Events
  * @subpackage Appointments
@@ -131,22 +131,23 @@ class AppointmentOpenings
         $number_of_slots = count($this->slots);
 
         $events_to_skip = 4;
-        $day_of_week = date("w", $this->slots[0]) + 1;
-
+        // $day_of_week = date("w", $this->slots[0]) + 1;
+        $now = new \DateTime();
+        $now_timestamp = $now->getTimestamp() + 3600; // Give us an hour to prep
         $j = 1;
         foreach($slot_avail as $i => $availability) {
             if ($availability == 1) {
                 $time = $this->slots[$i];
                 if ($j == $events_to_skip) {
-                    $slots_times[] = $time;
-                    $j = 1;
+                    if ($time > $now_timestamp) {
+                        $slots_times[] = $time;
+                        $j = 1;
+                    }
                 } else {
                     $j++;
                 }
             }
         }
-
-
         return $slots_times;
     }
 }

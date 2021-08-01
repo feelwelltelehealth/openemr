@@ -178,6 +178,8 @@ class HttpRestRouteHandler
             }
         } elseif(
                 ($restRequest->getResource() === 'appointment' && $restRequest->getRequestMethod() === 'GET') ||
+                // TODO: Check this better
+                ($restRequest->getResource() === 'password_reset' && ($restRequest->getRequestMethod() === 'POST' || $restRequest->getRequestMethod() === 'GET')) ||
                 ($restRequest->getResource() === 'patient' && $restRequest->getRequestMethod() === 'POST')) {
             return;
         } elseif (($restRequest->getApiType() === 'oemr') || ($restRequest->getApiType() === 'port')) {
