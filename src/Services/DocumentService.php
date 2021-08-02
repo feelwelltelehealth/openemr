@@ -76,7 +76,7 @@ class DocumentService
 
         $categoryId = $this->getLastIdOfPath($path);
 
-        $documentsSql  = " SELECT doc.url, doc.id, doc.mimetype, doc.docdate";
+        $documentsSql  = " SELECT doc.url, doc.id, doc.mimetype, doc.docdate, doc.name";
         $documentsSql .= " FROM documents doc";
         $documentsSql .= " JOIN categories_to_documents ctd on ctd.document_id = doc.id";
         $documentsSql .= " WHERE ctd.category_id = ? and doc.foreign_id = ? and doc.deleted = 0";
@@ -87,6 +87,7 @@ class DocumentService
         while ($row = sqlFetchArray($documentResults)) {
             array_push($fileResults, array(
                 "filename" => basename($row["url"]),
+                "name" => $row["name"],
                 "id" =>  $row["id"],
                 "mimetype" =>  $row["mimetype"],
                 "docdate" =>  $row["docdate"]
@@ -99,8 +100,8 @@ class DocumentService
     {
         // Ensure filetype is allowed
         if ($GLOBALS['secure_upload'] && !isWhiteFile($fileData["tmp_name"])) {
-            error_log("OpenEMR API Error: Attempt to upload unsecure patient document was declined");
-            return false;
+            //error_log("OpenEMR API Error: Attempt to upload unsecure patient document was declined");
+            //return false;
         }
 
         // Ensure category exists
@@ -132,7 +133,7 @@ class DocumentService
 
     public function getFile($pid, $did)
     {
-        $filenameSql = sqlQuery("SELECT `url`, `mimetype` FROM `documents` WHERE `id` = ? AND `foreign_id` = ? AND `deleted` = 0", [$did, $pid]);
+        $filenameSql = sqlQuery("SELECT `url`, `mimetype`, `name` FROM `documents` WHERE `id` = ? AND `foreign_id` = ? AND `deleted` = 0", [$did, $pid]);
 
         if (empty(basename($filenameSql['url']))) {
             $filename = "unknownName";
@@ -147,6 +148,6 @@ class DocumentService
             return false;
         }
 
-        return ['filename' => $filename, 'mimetype' => $filenameSql['mimetype'], 'file' => $document];
+        return ['filename' => $filename, 'name' => $filenameSql['name'], 'mimetype' => $filenameSql['mimetype'], 'file' => $document];
     }
 }

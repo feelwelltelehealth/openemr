@@ -1101,4 +1101,22 @@ RestConfig::$PORTAL_ROUTE_MAP = array(
         RestConfig::apiLog($return, $data);
         return $return;
     },
+    "POST /portal/patient/document" => function (HttpRestRequest $request) {
+        $pid = $request->getRequestUser()['pid'];
+        $return = (new DocumentRestController())->postWithPath($pid, $_GET['path'], $_FILES['document']);
+        RestConfig::apiLog($return);
+        return $return;
+    },
+    "GET /portal/patient/document" => function (HttpRestRequest $request) {
+        $pid = $request->getRequestUser()['pid'];
+        $return = (new DocumentRestController())->getAllAtPath($pid, $_GET['path']);
+        RestConfig::apiLog($return);
+        return $return;
+    },
+    "GET /portal/patient/document/:did" => function ($did, HttpRestRequest $request) {
+        $pid = $request->getRequestUser()['pid'];
+        $return = (new DocumentRestController())->downloadFile($pid, $did);
+        RestConfig::apiLog($return);
+        return $return;
+    },
 );
