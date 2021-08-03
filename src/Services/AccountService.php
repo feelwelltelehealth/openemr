@@ -132,13 +132,15 @@ class AccountService
         $one_time = $this->generateOnetime();
         // TODO: create patient_access_onsite row if it doesn't exist??
         if ($patientData['portal_username']) {
-            sqlStatementNoLog("UPDATE patient_access_onsite SET portal_username=?,portal_onetime=?,portal_pwd_status=0 WHERE pid=?", [
+            sqlStatementNoLog("UPDATE patient_access_onsite SET portal_username=?,portal_login_username=?,portal_onetime=?,portal_pwd_status=0 WHERE pid=?", [
+                $email,
                 $email,
                 $one_time,
                 $pid
             ]);
         } else {
-            sqlStatementNoLog("INSERT INTO patient_access_onsite SET portal_username=?,portal_onetime=?,portal_pwd_status=0,pid=?", [
+            sqlStatementNoLog("INSERT INTO patient_access_onsite SET portal_username=?,portal_login_username=?,portal_onetime=?,portal_pwd_status=0,pid=?", [
+                $email,
                 $email,
                 $one_time,
                 $pid
