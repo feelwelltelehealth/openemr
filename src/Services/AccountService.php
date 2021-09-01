@@ -131,7 +131,7 @@ class AccountService
         // generate portal_onetime, set portal_pwd_status = 0 and save to db
         $one_time = $this->generateOnetime();
         // TODO: create patient_access_onsite row if it doesn't exist??
-        if ($patientData['portal_username']) {
+        if ($patientData['portal_username'] || $patientData['portal_login_username']) {
             sqlStatementNoLog("UPDATE patient_access_onsite SET portal_username=?,portal_login_username=?,portal_onetime=?,portal_pwd_status=0 WHERE pid=?", [
                 $email,
                 $email,
@@ -139,12 +139,17 @@ class AccountService
                 $pid
             ]);
         } else {
-            sqlStatementNoLog("INSERT INTO patient_access_onsite SET portal_username=?,portal_login_username=?,portal_onetime=?,portal_pwd_status=0,pid=?", [
-                $email,
-                $email,
-                $one_time,
-                $pid
-            ]);
+            if ($pid) {
+                sqlStatementNoLog("INSERT INTO patient_access_onsite SET portal_username=?,portal_login_username=?,portal_onetime=?,portal_pwd_status=0,pid=?", [
+                    $email,
+                    $email,
+                    $one_time,
+                    $pid
+                ]);
+            } else {
+                error_log('OpenEMR Error : Could not set password reset for ' . $email);
+            }
+
         }
 
         // get portal_onetime and stick it into the email
