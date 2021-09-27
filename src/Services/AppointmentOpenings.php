@@ -53,6 +53,7 @@ class AppointmentOpenings
         $dt = new \DateTime();
         $now = $dt->getTimestamp();
         $start_date = strtotime($input_start_date);
+        // echo 'start_date ' . $start_date . PHP_EOL;
 
         $end_date = $start_date + $input_search_days * (24*60*60); // Add 24 * number of days hours
 
@@ -71,12 +72,16 @@ class AppointmentOpenings
         "FROM openemr_postcalendar_events " .
         "WHERE pc_aid = ? AND " .
         "((pc_endDate >= ? AND pc_eventDate < ?) OR " .
-        "(pc_endDate = '0000-00-00' AND pc_eventDate >= ? AND pc_eventDate < ?))";
+        "(pc_endDate = '0000-00-00' AND pc_eventDate >= ? AND pc_eventDate < ?)) " .
+        "ORDER BY pc_eventDate ASC, pc_startTime ASC";
 
         $sqlBindArray = array();
         array_push($sqlBindArray, $providerid, sqlDate($start_date), sqlDate($end_date), sqlDate($start_date), sqlDate($end_date));
         $events = fetchEvents(sqlDate($start_date), sqlDate($end_date), null, null, false, 0, $sqlBindArray, $query);
 
+        // $events = [$events[1], $events[2]];
+        //echo json_encode($events);
+        //die();
 
         $number_of_days = (int) $input_search_days;
 
@@ -86,6 +91,7 @@ class AppointmentOpenings
 
         // TODO: make this not 0
         $day_start = strtotime("midnight", $start_date);
+        // echo 'day start ' . $day_start . PHP_EOL;
         $slots = [];
         $slot_availability = []; // true if available false if not
         for ($i = 0; $i < $number_of_slots; $i++) {
@@ -97,7 +103,7 @@ class AppointmentOpenings
             $seconds = $minutes * 60;
 
             $event_start = strtotime($event['pc_eventDate'] . ' ' . $event['pc_startTime']);  // strtotime($event['pc_startTime']);
-            $event_end = $event_start + $event['pc_duration']; // $seconds
+            $event_end = $event_start + $seconds; // $seconds
             $catid = $event['pc_catid'];
 
             foreach ($slots as $i => $slot) {
@@ -110,14 +116,17 @@ class AppointmentOpenings
                     if ($catid == 2) { // 2 is the available to apointments category
                         if ($slot_availability[$i] == 0 ) {
                             // There is no availability on this slot yet. So we'll call this slot AVAILABLE!
+                            //echo "opening $i" . PHP_EOL;
                             $slot_availability[$i] |= 1;
                         }
                     } elseif ($catid == 3) { // out of office
+                        //echo "closing $i" . PHP_EOL;
                         if ($slot_availability[$i] == 1) {
                             $slot_availability[$i] = 0;
                         }
                     } else { // Other events (like appointments)
                         if ($slot <= $event_end) {
+                            //echo "closing $i because " . PHP_EOL;
                             $slot_availability[$i] |= 4;
                         }
                     }
@@ -134,12 +143,15 @@ class AppointmentOpenings
         $slots_times = [];
 
         $slots = $this->getSlots($input_catid, $input_search_days, $input_start_date, $provider_id_input);
-
+        //print_r(json_encode($slots));
+        //die();
         $now = new \DateTime();
-        $now_timestamp = $now->getTimestamp() + 3600; // Give us an hour to prep
+        $now_timestamp = $now->getTimestamp(); // + 3600; // Give us an hour to prep
+        // echo "now " . $now_timestamp . PHP_EOL;
         $slots_avail = [];
         foreach ($slots as $slot_index => $availability) {
-            if ($availability === 1  && ($this->slots[$slot_index]  > $now_timestamp)) {
+            // echo $this->slots[$slot_index] . PHP_EOL;
+            if ($availability === 1 && ($this->slots[$slot_index]  > $now_timestamp)) {
                 $slots_avail[] = $slot_index;
             }
         }
