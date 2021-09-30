@@ -71,7 +71,18 @@ class PatientRestController
     public function portalCreate($data)
     {
         // TODO: Add re-captcha
-        // TODO: Make sure the email is unique!!!
+        // Make sure the email is unique
+        $email = $data['email'];
+        if (!(validEmail($email))) {
+            return false;
+        }
+
+        $patientData = sqlQuery("SELECT `patient_data`.*, `patient_access_onsite`.`portal_username` FROM `patient_data` LEFT JOIN `patient_access_onsite` ON `patient_access_onsite`.`pid` = `patient_data`.`pid` WHERE `patient_data`.`email`=? ", array($email));
+        if ($patientData['pid']) {
+            // User already exists
+            return RestControllerHelper::responseHandler(["error" => "user already exists"], null, 409);
+        }
+
         $data['allow_patient_portal'] = "YES";
         $processingResult = $this->patientService->insert($data);
         $user = $processingResult->getData();
