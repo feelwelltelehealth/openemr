@@ -655,7 +655,6 @@ class AuthorizationController
         }
         // TODO: break this up - throw exception for not turned on.
         if (!empty($GLOBALS['oauth_password_grant']) && ($this->grantType === self::GRANT_TYPE_PASSWORD)) {
-<<<<<<< HEAD
             if ($this->new_user) {
                 $grant = new CustomNewUserGrant(
                     new UserRepository(),
@@ -667,12 +666,6 @@ class AuthorizationController
                         new RefreshTokenRepository()
                     );
             }
-=======
-            $grant = new CustomPasswordGrant(
-                new UserRepository(),
-                new RefreshTokenRepository($includeAuthGrantRefreshToken)
-            );
->>>>>>> 56c81eaa9c98a4cb7e9fdeabc139d13e19aa916e
             $grant->setRefreshTokenTTL(new DateInterval('P3M'));
             $authServer->enableGrantType(
                 $grant,
