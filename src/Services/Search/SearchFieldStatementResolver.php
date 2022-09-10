@@ -46,7 +46,7 @@ class SearchFieldStatementResolver
         } else if ($field instanceof CompositeSearchField) {
             return self::resolveCompositeSearchField($field, $count);
         } else {
-            throw new \InvalidArgumentException("Provided search field type was not implemented");
+            throw new SearchFieldException($field->getName(), "Provided search field type was not implemented");
         }
     }
 
@@ -59,7 +59,7 @@ class SearchFieldStatementResolver
     public static function resolveDateField(DateSearchField $searchField)
     {
         if (empty($searchField->getValues())) {
-            throw new \InvalidArgumentException("Search field " . $searchField->getField() . " does not have a value to search on");
+            throw new SearchFieldException($searchField->getField(), " field does not have a value to search on");
         }
 
         $clauses = [];
@@ -82,7 +82,7 @@ class SearchFieldStatementResolver
                 $lowerBoundDateRange = $value;
                 $upperBoundDateRange = $value;
             } else {
-                throw new \InvalidArgumentException("DateSearchField " . $searchField->getField() . " contained value that was not a DatePeriod or DateTime object");
+                throw new SearchFieldException($searchField->getField(), "DateSearchField contained value that was not a DatePeriod or DateTime object");
             }
 
             switch ($comparableValue->getComparator()) {
@@ -174,7 +174,7 @@ class SearchFieldStatementResolver
     public static function resolveReferenceField(ReferenceSearchField $searchField)
     {
         if (empty($searchField->getValues())) {
-            throw new \InvalidArgumentException("Search field " . $searchField->getField() . " does not have a value to search on");
+            throw new SearchFieldException($searchField->getField(), "field does not have a value to search on");
         }
 
         $searchFragment = new SearchQueryFragment();
@@ -204,7 +204,7 @@ class SearchFieldStatementResolver
     public static function resolveTokenField(TokenSearchField $searchField)
     {
         if (empty($searchField->getValues())) {
-            throw new \InvalidArgumentException("Search field " . $searchField->getField() . " does not have a value to search on");
+            throw new SearchFieldException($searchField->getField(), "field does not have a value to search on");
         }
 
         $searchFragment = new SearchQueryFragment();
@@ -214,10 +214,24 @@ class SearchFieldStatementResolver
 
         foreach ($values as $value) {
             /** @var TokenSearchValue $value  */
-            $clauses[] = $searchField->getField() . ' = ?';
-            // TODO: adunsulag when we better understand Token's we will improve this process of how we resolve the token
-            // field to its representative bound value
-            $searchFragment->addBoundValue($value->getCode());
+
+            if ($modifier === SearchModifier::MISSING) {
+                if ($value->getCode() === false) {
+                    // often our tokens get treated as string values so we will do this here also
+                    $clauses[] = "(" . $searchField->getField() . " IS NOT NULL AND " . $searchField->getField() . " != '') ";
+                } else {
+                    // TODO: @adunsulag do we want to compare token values to empty strings... it seems like that would be a missing value but
+                    // could we get an inaccurate result here? or will we end up with a case with a number to string conversion on a field
+                    // if the value is not a string?
+                    $clauses[] = "(" . $searchField->getField() . " IS NULL OR " . $searchField->getField() . " = '') ";
+                }
+            // if we have other modifiers we would handle them here
+            } else {
+                $clauses[] = $searchField->getField() . ' = ?';
+                // TODO: adunsulag when we better understand Token's we will improve this process of how we resolve the token
+                // field to its representative bound value
+                $searchFragment->addBoundValue($value->getCode());
+            }
         }
 
         if (count($clauses) > 1) {
@@ -237,7 +251,7 @@ class SearchFieldStatementResolver
     public static function resolveStringSearchField(StringSearchField $searchField)
     {
         if (empty($searchField->getValues())) {
-            throw new \InvalidArgumentException("Search field " . $searchField->getField() . " does not have a value to search on");
+            throw new SearchFieldException($searchField->getField(), "does not have a value to search on");
         }
 
         $clauses = [];
@@ -255,6 +269,9 @@ class SearchFieldStatementResolver
                 // not we may want to grab the specific table collation here in order to improve performance
                 // and avoid db casting...
                 array_push($clauses, "BINARY " . $searchField->getField() . ' = ?');
+                $searchFragment->addBoundValue($value);
+            } else if ($modifier == SearchModifier::NOT_EQUALS_EXACT) {
+                array_push($clauses, "BINARY " . $searchField->getField() . ' != ?');
                 $searchFragment->addBoundValue($value);
             }
         }

@@ -131,7 +131,7 @@ class InvoiceSummary
         $res = sqlStatement("SELECT " .
             "a.code_type, a.code, a.modifier, a.memo, a.payer_type, a.adj_amount, a.pay_amount, a.reason_code, " .
             "a.post_time, a.session_id, a.sequence_no, a.account_code, a.follow_up_note, " .
-            "s.payer_id, s.reference, s.check_date, s.deposit_date " .
+            "s.payer_id, s.reference, s.check_date, s.deposit_date, s.payment_method " .
             ",i.name " .
             "FROM ar_activity AS a " .
             "LEFT OUTER JOIN ar_session AS s ON s.session_id = a.session_id " .
@@ -144,7 +144,7 @@ class InvoiceSummary
                 if ($row['account_code'] == "PCP") {
                     $code = "Copay";
                 } else {
-                    $code = "Unknown";
+                    $code = "Claim level";
                 }
             }
 
@@ -152,9 +152,12 @@ class InvoiceSummary
                 $code .= ':' . $row['modifier'];
             }
 
-            $ins_id = 0 + $row['payer_id'];
+            $ins_id = (int) $row['payer_id'];
+            $codes[$code]['bal'] = $codes[$code]['bal'] ?? null;
             $codes[$code]['bal'] -= $row['pay_amount'];
             $codes[$code]['bal'] -= $row['adj_amount'];
+
+            $codes[$code]['chg'] = $codes[$code]['chg'] ?? null;
             $codes[$code]['chg'] -= $row['adj_amount'];
 
             $codes[$code]['adj'] = $codes[$code]['adj'] ?? null;
@@ -165,7 +168,7 @@ class InvoiceSummary
 
             // Add the details if they want 'em.
             if ($with_detail) {
-                if (!$codes[$code]['dtl']) {
+                if (!($codes[$code]['dtl'] ?? '')) {
                     $codes[$code]['dtl'] = array();
                 }
 
@@ -173,6 +176,10 @@ class InvoiceSummary
                 $paydate = empty($row['deposit_date']) ? substr($row['post_time'], 0, 10) : $row['deposit_date'];
                 if ($row['pay_amount'] != 0) {
                     $tmp['pmt'] = $row['pay_amount'];
+                    $tmp['pmt_method'] = $row['payment_method'];
+                } else {
+                    $tmp['pmt'] = 0;
+                    $tmp['pmt_method'] = '';
                 }
 
                 if (isset($row['reason_code'])) {
@@ -198,7 +205,7 @@ class InvoiceSummary
                     $tmp['src'] = empty($row['session_id']) ? $row['memo'] : $row['reference'];
                 }
 
-                $tmp['insurance_company'] = substr($row['name'], 0, 10);
+                $tmp['insurance_company'] = substr(($row['name'] ?? ''), 0, 10);
                 if ($ins_id) {
                     $tmp['ins'] = $ins_id;
                 }

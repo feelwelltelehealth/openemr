@@ -23,6 +23,16 @@ class EventAuditLogger
     use Singleton;
 
     /**
+     * @var CryptoGen
+     */
+    private $cryptoGen;
+
+    /**
+     * @var boolean
+     */
+    private $breakglassUser;
+
+    /**
      * Event action codes indicate whether the event is read/write.
      * C = create, R = read, U = update, D = delete, E = execute
      */
@@ -510,8 +520,7 @@ MSG;
      */
     public function auditSQLEvent($statement, $outcome, $binds = null)
     {
-
-        // Set up crypto object that will be used by this singleton class for for encryption/decryption (if not set up already)
+        // Set up crypto object that will be used by this singleton class for encryption/decryption (if not set up already)
         if (!isset($this->cryptoGen)) {
             $this->cryptoGen = new CryptoGen();
         }
@@ -519,8 +528,8 @@ MSG;
         $user =  $_SESSION['authUser'] ?? "";
 
         /* Don't log anything if the audit logging is not enabled. Exception for "emergency" users */
-        if (!isset($GLOBALS['enable_auditlog']) || !($GLOBALS['enable_auditlog'])) {
-            if (!$GLOBALS['gbl_force_log_breakglass'] || !$this->isBreakglassUser($user)) {
+        if (empty($GLOBALS['enable_auditlog'])) {
+            if (empty($GLOBALS['gbl_force_log_breakglass']) || !$this->isBreakglassUser($user)) {
                 return;
             }
         }
@@ -550,7 +559,7 @@ MSG;
 
         /* If query events are not enabled, don't log them. Exception for "emergency" users. */
         if (($querytype == "select") && !(array_key_exists('audit_events_query', $GLOBALS) && $GLOBALS['audit_events_query'])) {
-            if (!$GLOBALS['gbl_force_log_breakglass'] || !$this->isBreakglassUser($user)) {
+            if (empty($GLOBALS['gbl_force_log_breakglass']) || !$this->isBreakglassUser($user)) {
                 return;
             }
         }

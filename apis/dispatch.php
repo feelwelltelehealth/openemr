@@ -24,6 +24,7 @@ use OpenEMR\Common\Http\HttpRestRequest;
 use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Common\Session\SessionUtil;
 use OpenEMR\Common\Uuid\UuidRegistry;
+use OpenEMR\FHIR\SMART\SmartLaunchController;
 use OpenEMR\Events\RestApiExtend\RestApiCreateEvent;
 use Psr\Http\Message\ResponseInterface;
 
@@ -132,6 +133,23 @@ $restRequest->setIsLocalApi($isLocalApi);
 $sessionAllowWrite = true;
 require_once("./../interface/globals.php");
 
+// we now can check the database to see if the token is revoked
+// Note despite League\OAuth2\Server\AuthorizationValidators\BearerTokenValidator.php:L117 already checking for revoked
+// access token we have to do this logic here as we use the access token SCOPE parameter to determine our multi-site setting
+// and load up the correct database, our earlier access token logic returns false for revoked as we don't have db access
+//  for that reason we have this double check on validating the access token.
+if (!empty($tokenId)) {
+    $result = $gbl::validateAccessTokenRevoked($tokenId);
+    if ($result instanceof ResponseInterface) {
+        $logger->error("dispatch.php access token was revoked", ["resource" => $resource]);
+        // failed token verify
+        // not a request object so send the error as response obj
+        $gbl::emitResponse($result);
+        exit;
+    }
+}
+
+
 // recollect this so the DEBUG global can be used if set
 $logger = new SystemLogger();
 
@@ -237,7 +255,7 @@ if ($isLocalApi) {
     } elseif ($userRole === 'system' && ($gbl::is_fhir_request($resource))) {
         $logger->debug("dispatch.php valid role and system has access to api/fhir resource", ['resource' => $resource]);
     } else {
-        $logger->error("OpenEMR Error: api failed because user role does not have access to the resource");
+        $logger->error("OpenEMR Error: api failed because user role does not have access to the resource", ['resource' => $resource, 'userRole' => $userRole]);
         $gbl::destroySession();
         http_response_code(401);
         exit();
@@ -254,6 +272,9 @@ if ($isLocalApi) {
             http_response_code(401);
             exit();
         }
+        if ($restRequest->requestHasScope(SmartLaunchController::CLIENT_APP_STANDALONE_LAUNCH_SCOPE)) {
+            $restRequest = $gbl->populateTokenContextForRequest($restRequest);
+        }
     } elseif ($userRole == 'patient') {
         $_SESSION['pid'] = $user['pid'] ?? null;
         $puuidCheck = $user['uuid'] ?? null;
@@ -265,6 +286,8 @@ if ($isLocalApi) {
             http_response_code(401);
             exit();
         }
+        $restRequest->setPatientRequest(true);
+        $restRequest->setPatientUuidString($puuidStringCheck);
     } else if ($userRole === 'system') {
         $_SESSION['authUser'] = $user["username"] ?? null;
         $_SESSION['authUserID'] = $user["id"] ?? null;

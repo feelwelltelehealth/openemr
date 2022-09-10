@@ -47,14 +47,14 @@ $facility = prevSetting($uspfx, 'form_facility', 'form_facility', '');
 $provider = prevSetting($uspfx, 'form_provider', 'form_provider', $_SESSION['authUserID']);
 
 if (
-    ($_POST['setting_new_window']) ||
-    ($_POST['setting_bootstrap_submenu']) ||
-    ($_POST['setting_selectors'])
+    ($_POST['setting_new_window'] ?? '') ||
+    ($_POST['setting_bootstrap_submenu'] ?? '') ||
+    ($_POST['setting_selectors'] ?? '')
 ) {
     // These are not form elements. We only ever change them via ajax, so exit now.
     exit();
 }
-if ($_POST['saveCALLback'] == "Save") {
+if (($_POST['saveCALLback'] ?? '') == "Save") {
     $sqlINSERT = "INSERT INTO medex_outgoing (msg_pc_eid,msg_pid,campaign_uid,msg_type,msg_reply,msg_extra_text)
                   VALUES
                 (?,?,?,'NOTES','CALLED',?)";
@@ -553,7 +553,7 @@ if (!$_REQUEST['flb_table']) {
                                     <span class='hidden' name='progCALLback_" . attr($appointment['eid']) . "' id='progCALLback_" . attr($appointment['eid']) . "'>
                                       <form id='notation_" . attr($appointment['eid']) . "' method='post'
                                       action='#'>
-                                        <input type='hidden' name='csrf_token_form' value='<?php echo attr(CsrfUtils::collectCsrfToken()); ?>' />
+                                        <input type='hidden' name='csrf_token_form' value='" . attr(CsrfUtils::collectCsrfToken()) . "' />
                                         <h4>" . xlt('Call Back Notes') . ":</h4>
                                         <input type='hidden' name='pc_eid' id='pc_eid' value='" . attr($appointment['eid']) . "'>
                                         <input type='hidden' name='pc_pid' id='pc_pid' value='" . attr($appointment['pc_pid']) . "'>
@@ -1148,4 +1148,5 @@ function myLocalJS()
         initTableButtons();
 
     </script>
-<?php } ?>
+<?php }
+?>

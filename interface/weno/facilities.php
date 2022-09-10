@@ -12,12 +12,13 @@ require_once("../globals.php");
 
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Csrf\CsrfUtils;
+use OpenEMR\Common\Twig\TwigContainer;
 use OpenEMR\Core\Header;
 use OpenEMR\Rx\Weno\FacilityProperties;
 
 //ensure user has proper access
 if (!AclMain::aclCheckCore('admin', 'super')) {
-    echo xlt('ACL Administration Not Authorized');
+    echo (new TwigContainer(null, $GLOBALS['kernel']))->getTwig()->render('core/unauthorized.html.twig', ['pageTitle' => xl("Weno Admin")]);
     exit;
 }
 
@@ -73,18 +74,7 @@ $facilities = $data->getFacilities();
     </table>
         <input type="<?php echo xla('Submit'); ?>" value="update" id="save_weno_id" class="btn_primary">
     </form>
-
-    <div style="padding-top: 20px">
-        <h3><?php echo xlt('Import/Update Pharmacies') ?></h3>
-            <div id="importstatus" style="padding-top: 15px">
-                <button class="btn btn-primary" id="connected" title="<?php echo xla("Weno Connected Phamacies Only");?>">
-                    <i id="loading" class="fa fa-sync fa-spin hide"></i><?php echo xlt('Import/Update')?></button>
-            </div>
-    </div>
-
 </div>
 <script src="weno.js"></script>
 </body>
 </html>
-
-

@@ -18,7 +18,7 @@
  *  - execute(BatchClaim $claim) called on each claim, where the task can add to a batch file, or whatever
  *  - complete($context) called after the claim loop to generate any output, or clean up
  *
- * This file is a refacoting of the original billing_process.php file which was
+ * This file is a refactoring of the original billing_process.php file which was
  * becoming increasingly cluttered and ridden with logic errors because of the complexity
  * of the looping and branching. This pattern allows each processing task to own it's
  * class and not be mixed with others.
@@ -110,7 +110,8 @@ class BillingProcessor
                 // Since the format is cryptic, we use the BillingClaim constructor to parse that into meaningful
                 // attributes
                 $billingClaim = new BillingClaim($claimId, $partner_and_payor);
-                if (($billingClaim->getPartner() == -1) && ($_SESSION['bn_x12'])) {
+                $bn_x12 = $_SESSION['bn_x12'] ?? '';
+                if (($billingClaim->getPartner() == -1) && $bn_x12) {
                     // If the x-12 partner is unassigned, don't process it.
                     $this->logger->printToScreen(xl("No X-12 partner assigned for claim " . $billingClaim->getId()));
                     continue;
@@ -163,8 +164,10 @@ class BillingProcessor
         } elseif (isset($post['bn_mark'])) {
             $processing_task = new Tasks\TaskMarkAsClear();
         } elseif ($GLOBALS['gen_x12_based_on_ins_co'] && isset($post['bn_x12'])) {
+            SessionUtil::setSession('bn_x12', true);
             $processing_task = new Tasks\GeneratorX12Direct($this->extractAction());
         } elseif ($GLOBALS['gen_x12_based_on_ins_co'] && isset($post['bn_x12_encounter'])) {
+            SessionUtil::setSession('bn_x12', true);
             $processing_task = new Tasks\GeneratorX12Direct($this->extractAction(), true);
         } elseif (isset($post['bn_x12'])) {
             SessionUtil::setSession('bn_x12', true);
@@ -172,6 +175,8 @@ class BillingProcessor
         } elseif (isset($post['bn_x12_encounter'])) {
             SessionUtil::setSession('bn_x12', true);
             $processing_task = new Tasks\GeneratorX12($this->extractAction(), true);
+        } elseif (isset($post['bn_hcfa_txt_file'])) {
+            $processing_task = new Tasks\GeneratorHCFA($this->extractAction());
         } elseif (isset($post['bn_process_hcfa'])) {
             $processing_task = new Tasks\GeneratorHCFA_PDF($this->extractAction());
         } elseif (isset($post['bn_process_hcfa_form'])) {

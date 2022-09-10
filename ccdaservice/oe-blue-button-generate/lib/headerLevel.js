@@ -17,7 +17,29 @@ patientName.attributes = {
 var patient = exports.patient = {
     key: "patient",
     content: [
-        patientName, {
+        patientName,
+        {
+            key: "name",
+            content: [{
+                key: "given",
+                attributes: {
+                    qualifier: "BR"
+                },
+                text: leafLevel.inputProperty("first")
+            }, {
+                key: "given",
+                text: leafLevel.inputProperty("middle"),
+                existsWhen: condition.propertyNotEmpty("middle")
+            }, {
+                key: "family",
+                attributes: {
+                    qualifier: "BR"
+                },
+                text: leafLevel.inputProperty("last")
+            }],
+            dataKey: "birth_name",
+            existsWhen: condition.propertyNotEmpty("last")
+        }, {
             key: "administrativeGenderCode",
             attributes: {
                 code: function (input) {
@@ -35,15 +57,17 @@ var patient = exports.patient = {
             key: "maritalStatusCode",
             attributes: {
                 code: function (input) {
-                    if (Object.prototype.toString.call(input) === "[object String]")
+                    if (Object.prototype.toString.call(input) === "[object String]") {
                         return input.substring(0, 1);
-                    else return input.code.substring(0, 1);
+                    } else {
+                        return input.code.substring(0, 1);
+                    }
                 },
                 displayName: leafLevel.input,
                 codeSystem: "2.16.840.1.113883.5.2",
                 codeSystemName: "HL7 Marital Status"
             },
-            dataKey: "marital_status"
+            dataKey: "marital_status",
         }, {
             key: "religiousAffiliationCode",
             attributes: leafLevel.codeFromName("2.16.840.1.113883.5.1076"),
@@ -52,6 +76,10 @@ var patient = exports.patient = {
             key: "raceCode",
             attributes: leafLevel.codeFromName("2.16.840.1.113883.6.238"),
             dataKey: "race"
+        }, {
+            key: "sdtc:raceCode",
+            attributes: leafLevel.codeFromName("2.16.840.1.113883.6.238"),
+            dataKey: "race_additional"
         }, {
             key: "ethnicGroupCode",
             attributes: leafLevel.codeFromName("2.16.840.1.113883.6.238"),
@@ -128,7 +156,7 @@ var patient = exports.patient = {
     ]
 };
 
-var provider = exports.provider = {
+var provider = exports.provider = [{
     key: "performer",
     attributes: {
         typeCode: "PRF"
@@ -142,7 +170,8 @@ var provider = exports.provider = {
                 "codeSystem": "2.16.840.1.113883.12.443",
                 "codeSystemName": "Provider Role"
             },
-            content: [{ key: "originalText",text: "Primary Care Provider"}]
+            existsWhen: condition.propertyNotEmpty('function_code'),
+            content: [{key: "originalText", text: "Primary Care Provider"}]
         },
         {
             key: "assignedEntity",
@@ -156,58 +185,57 @@ var provider = exports.provider = {
             }, {
                 key: "code",
                 attributes: leafLevel.code,
+                content: [{key: "originalText", text: "Care Team Member"}],
                 dataKey: "type"
-            }, {
-                key: "addr",
-                attributes: {
-                    use: leafLevel.use("use")
-                },
-                content: [{
-                    key: "country",
-                    text: leafLevel.inputProperty("country")
-                }, {
-                    key: "state",
-                    text: leafLevel.inputProperty("state")
-                }, {
-                    key: "city",
-                    text: leafLevel.inputProperty("city")
-                }, {
-                    key: "postalCode",
-                    text: leafLevel.inputProperty("zip")
-                }, {
-                    key: "streetAddressLine",
-                    text: leafLevel.input,
-                    dataKey: "street_lines"
-                }],
-                dataKey: "address"
-            }, {
-                    key: "telecom",
-                    attributes: [{
-                        use: "WP",
-                        value: function (input) {
-                            return input.value.number;
-                        }
-                    }],
-                    dataKey: "phone"
-                }, {
+            },
+                fieldLevel.usRealmAddress,
+                fieldLevel.telecom,
+                {
                     key: "assignedPerson",
-                    content: [{
-                        key: "name",
-                        content: [{
-                            key: "given",
-                            text: leafLevel.inputProperty("first")
-                        }, {
-                            key: "family",
-                            text: leafLevel.inputProperty("last")
-                        }],
-                        dataKey: "name"
-                    }]
+                    content: fieldLevel.usRealmName
                 }
             ]
         }
     ],
-    dataKey: "providers"
+    dataKey: "providers.provider"
+}];
+
+var providers = exports.providers = {
+    key: "documentationOf",
+    attributes: {
+        typeCode: "DOC"
+    },
+    content: {
+        key: "serviceEvent",
+        attributes: {
+            classCode: "PCPR"
+        },
+        content: [
+            {
+                key: "code",
+                attributes: leafLevel.code,
+                existsWhen: condition.propertyNotEmpty('code'),
+                dataKey: "providers.code"
+            },
+            [fieldLevel.effectiveTime, key("effectiveTime"), dataKey("providers.date_time"), required],
+            provider
+        ]
+    },
+    dataKey: "data.demographics"
 };
+
+var participants = exports.participant = [{
+    key: "participant"
+    , attributes: {
+        typeCode: leafLevel.inputProperty("typeCode")
+    }
+    , content: [
+        [fieldLevel.effectiveTime, required, key("time")],
+        // associatedEntity
+        , fieldLevel.associatedEntity
+    ]
+    , dataKey: "meta.ccda_header.participants"
+}];
 
 var attributed_provider = exports.attributed_provider = {
     key: "providerOrganization",
@@ -274,10 +302,8 @@ var recordTarget = exports.recordTarget = {
 
 var headerAuthor = exports.headerAuthor = {
     key: "author",
-    content: [{
-        key: "time"
-    },
-        [fieldLevel.timeNow, required, key("time")],
+    content: [
+        [fieldLevel.effectiveTime, required, key("time")],
         {
             key: "assignedAuthor",
             content: [{
@@ -286,109 +312,113 @@ var headerAuthor = exports.headerAuthor = {
                     root: leafLevel.inputProperty("identifier"),
                     extension: leafLevel.inputProperty("extension")
                 },
-                dataKey: 'author.identifiers',
+                dataKey: 'identifiers',
             }, {
-                    key: "addr",
-                    attributes: {
-                        use: leafLevel.use("use")
-                    },
-                    content: [{
-                        key: "country",
-                        text: leafLevel.inputProperty("country")
-                    }, {
-                        key: "state",
-                        text: leafLevel.inputProperty("state")
-                    }, {
-                        key: "city",
-                        text: leafLevel.inputProperty("city")
-                    }, {
-                        key: "postalCode",
-                        text: leafLevel.inputProperty("zip")
-                    }, {
-                        key: "streetAddressLine",
-                        text: leafLevel.input,
-                        dataKey: "street_lines"
-                    }],
-                    dataKey: "author.address"
-                },{
-                    key: "telecom",
-                    attributes: {
-                        value: leafLevel.inputProperty("number"),
-                        use: leafLevel.inputProperty("type")
-                    },
-                    dataKey: "author.phone",
-                    //dataTransform: translate.telecom
+                key: "code",
+                attributes: leafLevel.code,
+                existsWhen: condition.propertyNotEmpty('code'),
+                dataKey: "code"
+            }, {
+                key: "addr",
+                attributes: {
+                    use: leafLevel.use("use")
+                },
+                content: [{
+                    key: "country",
+                    text: leafLevel.inputProperty("country")
                 }, {
-                    key: "assignedPerson",
-                    content: {
-                        key: "name",
-                        content: [
-                            {
-                                key: "family",
-                                text: leafLevel.inputProperty("family")
-                            }, {
-                                key: "given",
-                                text: leafLevel.input,
-                                dataKey: "given"
-                            }, {
-                                key: "prefix",
-                                text: leafLevel.inputProperty("prefix")
-                            }, {
-                                key: "suffix",
-                                text: leafLevel.inputProperty("suffix")
-                            }],
-                        dataKey: "author.name",
-                        dataTransform: translate.name
-                    } // content
+                    key: "state",
+                    text: leafLevel.inputProperty("state")
                 }, {
-                    key: "representedOrganization",
+                    key: "city",
+                    text: leafLevel.inputProperty("city")
+                }, {
+                    key: "postalCode",
+                    text: leafLevel.inputProperty("zip")
+                }, {
+                    key: "streetAddressLine",
+                    text: leafLevel.input,
+                    dataKey: "street_lines"
+                }],
+                dataKey: "address"
+            }, {
+                key: "telecom",
+                attributes: {
+                    value: leafLevel.inputProperty("value"),
+                    use: leafLevel.inputProperty("use")
+                },
+                dataTransform: translate.telecom
+            }, {
+                key: "assignedPerson",
+                content: {
+                    key: "name",
                     content: [
                         {
-                            key: "id",
-                            attributes: {
-                                root: leafLevel.inputProperty("root")
-                            },
-                            dataKey: "identity"
+                            key: "family",
+                            text: leafLevel.inputProperty("family")
                         }, {
-                            key: "name",
+                            key: "given",
                             text: leafLevel.input,
-                            dataKey: "name"
+                            dataKey: "given"
                         }, {
-                            key: "telecom",
-                            attributes: {
-                                value: leafLevel.inputProperty("value"),
-                                use: leafLevel.inputProperty("use")
-                            },
-                            dataTransform: translate.telecom,
-                            datakey: "phone"
+                            key: "prefix",
+                            text: leafLevel.inputProperty("prefix")
+                        }, {
+                            key: "suffix",
+                            text: leafLevel.inputProperty("suffix")
+                        }],
+                    dataKey: "name",
+                    dataTransform: translate.name
+                } // content
+            }, {
+                key: "representedOrganization",
+                content: [
+                    {
+                        key: "id",
+                        attributes: {
+                            root: leafLevel.inputProperty("root")
                         },
-                        {
-                            key: "addr",
-                            attributes: {
-                                use: leafLevel.use("use")
-                            },
-                            content: [{
-                                key: "country",
-                                text: leafLevel.inputProperty("country")
-                            }, {
-                                key: "state",
-                                text: leafLevel.inputProperty("state")
-                            }, {
-                                key: "city",
-                                text: leafLevel.inputProperty("city")
-                            }, {
-                                key: "postalCode",
-                                text: leafLevel.inputProperty("zip")
-                            }, {
-                                key: "streetAddressLine",
-                                text: leafLevel.input,
-                                dataKey: "street_lines"
-                            }],
-                            dataKey: "address"
-                        }
-                    ],
-                    dataKey: "author.organization"
-                }
+                        dataKey: "identity"
+                    }, {
+                        key: "name",
+                        text: leafLevel.input,
+                        dataKey: "name"
+                    }, {
+                        key: "telecom",
+                        attributes: {
+                            value: leafLevel.inputProperty("value"),
+                            use: leafLevel.inputProperty("use")
+                        },
+                        dataTransform: translate.telecom,
+                        datakey: "phone"
+                    },
+                    {
+                        key: "addr",
+                        attributes: {
+                            use: leafLevel.use("use")
+                        },
+                        content: [{
+                            key: "country",
+                            text: leafLevel.inputProperty("country")
+                        }, {
+                            key: "state",
+                            text: leafLevel.inputProperty("state")
+                        }, {
+                            key: "city",
+                            text: leafLevel.inputProperty("city")
+                        }, {
+                            key: "postalCode",
+                            text: leafLevel.inputProperty("zip")
+                        }, {
+                            key: "streetAddressLine",
+                            text: leafLevel.input,
+                            dataKey: "street_lines"
+                        }],
+                        dataKey: "address"
+                    }
+                ],
+                dataKey: "organization"
+            }
             ] // content
         }
     ],
@@ -418,7 +448,6 @@ var headerInformant = exports.headerInformant = {
                 key: "name",
                 text: leafLevel.inputProperty("name"),
                 dataKey: "name"
-
             }]
         }]
     },
@@ -482,21 +511,92 @@ var headerCustodian = exports.headerCustodian = {
     },
     dataKey: "meta.ccda_header.custodian"
 };
-
-var providers = exports.providers = {
-    key: "documentationOf",
-    attributes: {
-        typeCode: "DOC"
-    },
+var headerInformationRecipient = exports.headerInformationRecipient = {
+    key: "informationRecipient",
     content: {
-        key: "serviceEvent",
-        attributes: {
-            classCode: "PCPR"
+        key: "intendedRecipient",
+        content: [{
+            key: "informationRecipient",
+            content: {
+                key: "name",
+                content: [
+                    {
+                        key: "family",
+                        text: leafLevel.inputProperty("family")
+                    }, {
+                        key: "given",
+                        text: leafLevel.input,
+                        dataKey: "given"
+                    }, {
+                        key: "prefix",
+                        text: leafLevel.inputProperty("prefix")
+                    }, {
+                        key: "suffix",
+                        text: leafLevel.inputProperty("suffix")
+                    }],
+                dataKey: "name",
+                dataTransform: translate.name,
+            },
         },
+            {
+                key: "receivedOrganization",
+                content: [{
+                    key: "name",
+                    text: leafLevel.inputProperty("name"),
+                    dataKey: "organization"
+                }],
+            }]
+    },
+    dataKey: "meta.ccda_header.information_recipient"
+}
+
+/* {
+    key: "receivedOrganization",
+    content: [{
+        key: "name",
+        text: leafLevel.inputProperty("name"),
+        dataKey: "organization"
+    }],
+}*/
+
+var headerComponentOf = exports.headerComponentOf = {
+    key: "componentOf",
+    content: {
+        key: "encompassingEncounter",
         content: [
-            [fieldLevel.effectiveTime, key("effectiveTime"), dataKey("providers.date_time"), required],
-            provider
+            fieldLevel.id,
+            {
+                key: "code",
+                attributes: leafLevel.code,
+                existsWhen: condition.propertyNotEmpty('code'),
+                dataKey: "code"
+            },
+            [fieldLevel.effectiveTime, key("effectiveTime"), dataKey("date_time"), required],
+            fieldLevel.responsibleParty,
+            {
+                key: "encounterParticipant",
+                attributes: {
+                    "typeCode": "ATND"
+                },
+                content: [{
+                    key: "assignedEntity",
+                    content: [{
+                        key: "id",
+                        attributes: {
+                            root: leafLevel.inputProperty("root")
+                        }
+                    }
+                        , fieldLevel.usRealmAddress
+                        , fieldLevel.telecom
+                        , {
+                            key: "assignedPerson",
+                            content: fieldLevel.usRealmName
+                        }]
+                }],
+                dataKey: "encounter_participant",
+                existsWhen: condition.propertyValueNotEmpty("name.last")
+            }
         ]
     },
-    dataKey: "data.demographics"
+    dataKey: "meta.ccda_header.component_of"
 };

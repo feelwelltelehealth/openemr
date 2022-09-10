@@ -35,11 +35,15 @@ use OpenEMR\Core\Header;
 use OpenEMR\Common\Csrf\CsrfUtils;
 
 // mdsupport : li code
-function listitemCode($strDisp, $strInsert)
+function listitemCode($strDisp, $strInsert, $ref = '')
 {
     if ($strInsert) {
+        if (!empty($ref)) {
+            $id = text($ref);
+            $ref = " {|$id|}";
+        }
         echo '<li><a href="#" onclick="top.restoreSession();CKEDITOR.instances.textarea1.insertText(' .
-             "'" . htmlspecialchars($strInsert, ENT_QUOTES) . "'" . ');">' . htmlspecialchars($strDisp, ENT_QUOTES) . '</a></li>';
+             "'" . text($strInsert) . $ref . "'" . ');">' . text($strDisp) . '</a></li>';
     }
 }
 
@@ -177,10 +181,10 @@ if (empty($isNN) && empty($rowContext)) {
 </head>
 <body class="body_top">
 <div class="container-fluid">
-  <input type="hidden" name="list_id" id="list_id" value="<?php echo $rowContext['cl_list_id']; ?>" />
-  <?php if ($rowContext['cl_list_item_long'] || !$isNN) { ?>
+  <input type="hidden" name="list_id" id="list_id" value="<?php echo $rowContext['cl_list_id'] ?? ''; ?>" />
+  <?php if (($rowContext['cl_list_item_long'] ?? null) || !$isNN) { ?>
   <!-- don't escape $contextName it's html -->
-  <h3 class="text-center"><?php echo $rowContext['cl_list_item_long'] ? text($rowContext['cl_list_item_long']) : $contextName; ?></h3>
+  <h3 class="text-center"><?php echo (text($rowContext['cl_list_item_long'] ?? ''))  ?: $contextName; ?></h3>
     <div id="tab1" class="tabset_content tabset_content_active">
         <form id="mainForm">
             <input type="hidden" name="type" id="type" value="<?php echo  attr($type); ?>" />
@@ -203,7 +207,7 @@ if (empty($isNN) && empty($rowContext)) {
                 <select class="form-control form-control-sm" name="template" id="template" onchange="TemplateSentence(this.value)">
                     <option value=""><?php echo htmlspecialchars(xl('Select category'), ENT_QUOTES); ?></option>
                     <?php
-                    $resTemplates = sqlStatement("SELECT * FROM template_users AS tu LEFT OUTER JOIN customlists AS c ON tu.tu_template_id=c.cl_list_slno WHERE tu.tu_user_id=? AND c.cl_list_type=3 AND cl_list_id=? AND cl_deleted=0 ORDER BY c.cl_list_item_long", array($_SESSION['authUserID'], $rowContext['cl_list_id']));
+                    $resTemplates = sqlStatement("SELECT * FROM template_users AS tu LEFT OUTER JOIN customlists AS c ON tu.tu_template_id=c.cl_list_slno WHERE tu.tu_user_id=? AND c.cl_list_type=3 AND cl_list_id=? AND cl_deleted=0 ORDER BY c.cl_list_item_long", array($_SESSION['authUserID'], ($rowContext['cl_list_id'] ?? null)));
                     while ($rowTemplates = sqlFetchArray($resTemplates)) {
                         echo "<option value='" . htmlspecialchars($rowTemplates['cl_list_slno'], ENT_QUOTES) . "'>" . htmlspecialchars(xl($rowTemplates['cl_list_item_long']), ENT_QUOTES) . "</option>";
                     }
@@ -258,14 +262,17 @@ if (empty($isNN) && empty($rowContext)) {
                                 </li>
                                 <?php
                                 foreach ($ISSUE_TYPES as $issType => $issTypeDesc) {
-                                    $res = sqlStatement('SELECT title, IF(diagnosis="","",CONCAT(" [",diagnosis,"]")) codes FROM lists WHERE pid=? AND type=? AND enddate IS NULL ORDER BY title', array($pid, $issType));
+                                    $res = sqlStatement('SELECT title, id, IF(diagnosis="","",CONCAT(" [",diagnosis,"]")) codes FROM lists WHERE pid=? AND type=? AND enddate IS NULL ORDER BY title', array($pid, $issType));
                                     if (sqlNumRows($res)) { ?>
                                     <li>
                                         <a class="collapsed"><?php echo htmlspecialchars(xl($issTypeDesc[0]), ENT_QUOTES); ?></a>
                                         <ul>
                                             <?php
                                             while ($row = sqlFetchArray($res)) {
-                                                listitemCode((strlen($row['title']) > 20) ? (substr($row['title'], 0, 18) . '..') : $row['title'], ($row['title'] . $row['codes']));
+                                                if (!empty($isNN)) {
+                                                    $row['id'] = "";
+                                                }
+                                                listitemCode((strlen($row['title']) > 20) ? (substr($row['title'], 0, 18) . '..') : $row['title'], ($row['title'] . $row['codes']), $row['id']);
                                             }
                                             ?>
                                         </ul>
@@ -276,7 +283,7 @@ if (empty($isNN) && empty($rowContext)) {
                         </ul>
                     </div>
                 </div>
-                <a href="personalize.php?list_id=<?php echo $rowContext['cl_list_id']; ?>" id="personalize_link" class="iframe_medium btn btn-primary btn-sm"><?php echo htmlspecialchars(xl('Personalize'), ENT_QUOTES); ?></a>
+                <a href="personalize.php?list_id=<?php echo $rowContext['cl_list_id'] ?? ''; ?>" id="personalize_link" class="iframe_medium btn btn-primary btn-sm"><?php echo htmlspecialchars(xl('Personalize'), ENT_QUOTES); ?></a>
                 <a href="add_custombutton.php" id="custombutton" class="iframe_medium btn btn-primary btn-sm" title="<?php echo htmlspecialchars(xl('Add Buttons for Special Chars,Texts to be Displayed on Top of the Editor for inclusion to the text on a Click'), ENT_QUOTES); ?>"><?php echo htmlspecialchars(xl('Add Buttons'), ENT_QUOTES); ?></a>
               </div>
               <div class="col-md-8">

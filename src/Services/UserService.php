@@ -16,7 +16,10 @@
 
 namespace OpenEMR\Services;
 
+use OpenEMR\Common\Database\QueryUtils;
 use OpenEMR\Common\Uuid\UuidRegistry;
+use OpenEMR\Services\Search\FhirSearchWhereClauseBuilder;
+use OpenEMR\Validators\ProcessingResult;
 
 class UserService
 {
@@ -32,8 +35,13 @@ class UserService
     {
     }
 
+    public function getUuidFields()
+    {
+        return ['uuid'];
+    }
+
     /**
-     * Given a username, heck to ensure user is in a group (and collect the group name)
+     * Given a username, check to ensure user is in a group (and collect the group name)
      * Returns the group name if successful, or false if failure
      *
      * @param $username
@@ -54,7 +62,9 @@ class UserService
      */
     public function getUser($userId)
     {
-        return sqlQuery("SELECT * FROM `users` WHERE `id` = ?", [$userId]);
+        // TODO: look at deserializing uuid with createResultRecordFromDatabaseResult here
+        $record = sqlQuery("SELECT * FROM `users` WHERE `id` = ?", [$userId]);
+        return $this->createResultRecordFromDatabaseResult($record);
     }
 
     /**
@@ -62,7 +72,11 @@ class UserService
      */
     public function getUserByUsername($username)
     {
-        return sqlQuery("SELECT * FROM `users` WHERE `username` = ?", [$username]);
+        $record = sqlQuery("SELECT * FROM `users` WHERE BINARY `username` = ?", [$username]);
+        if (!empty($record)) {
+            return $this->createResultRecordFromDatabaseResult($record);
+        }
+        return $record;
     }
 
     /**
@@ -76,10 +90,8 @@ class UserService
         if (!empty($user)) {
             if (empty($user['uuid'])) {
                 // we should always have this setup, but create them just in case.
-                (new UuidRegistry(['table_name' => 'users']))->createMissingUuids();
+                UuidRegistry::createMissingUuidsForTables(['users']);
             }
-            // convert to a string value here
-            $user['uuid'] = UuidRegistry::uuidToString($user['uuid']);
         }
         return $user;
     }
@@ -92,6 +104,7 @@ class UserService
         $users = [];
         $user = sqlStatement("SELECT * FROM `users` WHERE (`username` != '' AND `username` IS NOT NULL) AND `active` = 1 ORDER BY `lname` ASC, `fname` ASC, `mname` ASC");
         while ($row = sqlFetchArray($user)) {
+            // TODO: look at deserializing uuid with createResultRecordFromDatabaseResult here
             $users[] = $row;
         }
         return $users;
@@ -102,6 +115,7 @@ class UserService
      */
     public function getCurrentlyLoggedInUser()
     {
+        // TODO: look at deserializing uuid with createResultRecordFromDatabaseResult here
         return sqlQuery("SELECT * FROM `users` WHERE `id` = ?", [$_SESSION['authUserID']]);
     }
 
@@ -118,9 +132,59 @@ class UserService
         $user = sqlQuery("SELECT * FROM `users` WHERE `uuid` = ?", [$uuid]);
         // this is very annoying...
         if (!empty($user)) {
-            $user['uuid'] = UuidRegistry::uuidToString($user['uuid']);
+            $user = $this->createResultRecordFromDatabaseResult($user);
         }
         return $user;
+    }
+
+    public function search($search, $isAndCondition = true)
+    {
+        $sql = "SELECT  id,
+                        uuid,
+                        users.title as title,
+                        fname,
+                        lname,
+                        mname,
+                        federaltaxid,
+                        federaldrugid,
+                        upin,
+                        facility_id,
+                        facility,
+                        npi,
+                        email,
+                        active,
+                        specialty,
+                        billname,
+                        url,
+                        assistant,
+                        organization,
+                        valedictory,
+                        street,
+                        streetb,
+                        city,
+                        state,
+                        zip,
+                        phone,
+                        fax,
+                        phonew1,
+                        phonecell,
+                        users.notes,
+                        state_license_number,
+                        abook.title as abook_title
+                FROM  users
+                LEFT JOIN list_options as abook ON abook.option_id = users.abook_type";
+        $whereClause = FhirSearchWhereClauseBuilder::build($search, $isAndCondition);
+
+        $sql .= $whereClause->getFragment();
+        $sqlBindArray = $whereClause->getBoundValues();
+        $statementResults =  QueryUtils::sqlStatementThrowException($sql, $sqlBindArray);
+
+        $processingResult = new ProcessingResult();
+        while ($row = sqlFetchArray($statementResults)) {
+            $resultRecord = $this->createResultRecordFromDatabaseResult($row);
+            $processingResult->addData($resultRecord);
+        }
+        return $processingResult;
     }
 
     /**
@@ -167,7 +231,7 @@ class UserService
                         phonecell,
                         users.notes,
                         state_license_number,
-                        abook.title as abook_title,
+                        abook.title as abook_title
                 FROM  users
                 LEFT JOIN list_options as abook ON abook.option_id = users.abook_type";
 
@@ -185,10 +249,42 @@ class UserService
         $statementResults = sqlStatement($sql, $sqlBindArray);
         $results = [];
         while ($row = sqlFetchArray($statementResults)) {
-            $row['uuid'] = UuidRegistry::uuidToString($row['uuid']);
-            $results[] = $row;
+            $results[] = $this->createResultRecordFromDatabaseResult($row);
         }
 
         return $results;
+    }
+
+    /**
+     * @return array id of User
+     */
+    public function getIdByUsername($username)
+    {
+        $id = sqlQuery("SELECT `id` FROM `users` WHERE BINARY `username` = ?", [$username]);
+        if (!empty($id['id'])) {
+            return $id['id'];
+        } else {
+            return false;
+        }
+    }
+
+    /**
+     * Allows any mapping data conversion or other properties needed by a service to be returned.
+     * @param $row The record returned from the database
+     */
+    protected function createResultRecordFromDatabaseResult($row)
+    {
+        $uuidFields = $this->getUuidFields();
+        if (empty($uuidFields)) {
+            return $row;
+        } else {
+            // convert all of our byte columns to strings
+            foreach ($uuidFields as $fieldName) {
+                if (isset($row[$fieldName])) {
+                    $row[$fieldName] = UuidRegistry::uuidToString($row[$fieldName]);
+                }
+            }
+        }
+        return $row;
     }
 }

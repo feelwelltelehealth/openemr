@@ -4,10 +4,97 @@ var fieldLevel = require('../fieldLevel');
 var leafLevel = require('../leafLevel');
 var condition = require("../condition");
 var contentModifier = require("../contentModifier");
+var sharedEntryLevel = require("./sharedEntryLevel");
 
 var key = contentModifier.key;
 var required = contentModifier.required;
 var dataKey = contentModifier.dataKey;
+
+exports.healthConcernObservation = {
+    key: "observation",
+    attributes: {
+        classCode: "OBS",
+        moodCode: "EVN"
+    },
+    content: [
+        fieldLevel.templateIdExt("2.16.840.1.113883.10.20.22.4.5", "2014-06-09"),
+        fieldLevel.templateId("2.16.840.1.113883.10.20.22.4.5"),
+        fieldLevel.uniqueId,
+        fieldLevel.id, {
+            key: "code",
+            attributes: {
+                code: "11323-3",
+                codeSystem: "2.16.840.1.113883.6.1",
+                codeSystemName: "LOINC",
+                displayName: "Health Status"
+            },
+        },
+        fieldLevel.statusCodeCompleted,
+        {
+            key: "value",
+            attributes: [
+                leafLevel.typeCD,
+                leafLevel.code
+            ],
+            dataKey: "value",
+            existsWhen: condition.codeOrDisplayname
+        },
+        fieldLevel.effectiveTime,
+        fieldLevel.author,
+    ],
+
+}
+
+exports.healthConcernActivityAct = {
+    key: "act",
+    attributes: {
+        classCode: "ACT",
+        moodCode: "EVN"
+    },
+    content: [
+        fieldLevel.templateIdExt("2.16.840.1.113883.10.20.22.4.132", "2015-08-01"),
+        fieldLevel.uniqueId,
+        fieldLevel.id, {
+            key: "code",
+            attributes: {
+                code: "75310-3",
+                codeSystem: "2.16.840.1.113883.6.1",
+                codeSystemName: "LOINC",
+                displayName: "Health Concern"
+            },
+        },
+        fieldLevel.statusCodeActive,
+        fieldLevel.author,
+        [{
+            key: "entryRelationship",
+            attributes: {
+                typeCode: "REFR"
+            },
+            content: {
+                key: "act",
+                attributes: {
+                    classCode: "ACT",
+                    moodCode: "EVN"
+                },
+                content: [
+                    fieldLevel.templateId("2.16.840.1.113883.10.20.22.4.122"),
+                    fieldLevel.id, {
+                        key: "code",
+                        attributes: {
+                            nullFlavor: "NP",
+                        },
+                        datakey: "problems.identifiers",
+                    },
+                    fieldLevel.statusCodeCompleted
+                ]
+            },
+            dataKey: "problems"
+        }],
+    ],
+    existsWhen: function (input) {
+        return input.type === "act";
+    }
+};
 
 exports.planOfCareActivityAct = {
     key: "act",
@@ -23,8 +110,9 @@ exports.planOfCareActivityAct = {
             attributes: leafLevel.code,
             dataKey: "plan"
         },
-        fieldLevel.statusCodeNew,
-        fieldLevel.effectiveTime
+        fieldLevel.statusCodeActive,
+        fieldLevel.effectiveTime,
+        fieldLevel.author,
     ],
     existsWhen: function (input) {
         return input.type === "act";
@@ -35,7 +123,7 @@ exports.planOfCareActivityObservation = {
     key: "observation",
     attributes: {
         classCode: "OBS",
-        moodCode: "RQO"
+        moodCode: leafLevel.inputProperty("mood_code")
     },
     content: [
         fieldLevel.templateId("2.16.840.1.113883.10.20.22.4.44"),
@@ -45,8 +133,16 @@ exports.planOfCareActivityObservation = {
             attributes: leafLevel.code,
             dataKey: "plan"
         },
-        fieldLevel.statusCodeNew,
-        fieldLevel.effectiveTime
+        fieldLevel.statusCodeActive,
+        fieldLevel.effectiveTime,
+        {
+            key: "value",
+            attributes: {
+                "xsi:type": "ST"
+            },
+            text: leafLevel.inputProperty("name")
+        },
+        fieldLevel.author
     ],
     existsWhen: function (input) {
         return input.type === "observation";
@@ -67,8 +163,9 @@ exports.planOfCareActivityProcedure = {
             attributes: leafLevel.code,
             dataKey: "plan"
         },
-        fieldLevel.statusCodeNew,
-        fieldLevel.effectiveTime
+        fieldLevel.statusCodeActive,
+        fieldLevel.effectiveTime,
+        fieldLevel.author,
     ],
     existsWhen: function (input) {
         return input.type === "procedure";
@@ -89,14 +186,62 @@ exports.planOfCareActivityEncounter = {
             attributes: leafLevel.code,
             dataKey: "plan"
         },
-        fieldLevel.statusCodeNew,
-        fieldLevel.effectiveTime
+        fieldLevel.statusCodeActive,
+        fieldLevel.effectiveTime,
+        [fieldLevel.performer, dataKey("performers")], {
+            key: "participant",
+            attributes: {
+                typeCode: "LOC"
+            },
+            content: [
+                [sharedEntryLevel.serviceDeliveryLocation, required]
+            ],
+            dataKey: "locations"
+        }, {
+            key: "entryRelationship",
+            attributes: {
+                typeCode: "RSON"
+            },
+            content: [
+                [sharedEntryLevel.indication, required]
+            ],
+            dataKey: "findings",
+            dataTransform: function (input) {
+                input = input.map(function (e) {
+                    e.code = {
+                        code: "282291009",
+                        name: "Diagnosis",
+                        code_system: "2.16.840.1.113883.6.96",
+                        code_system_name: "SNOMED CT"
+                    };
+                    return e;
+                });
+                return input;
+            }
+        }
     ],
     existsWhen: function (input) {
         return input.type === "encounter";
     }
 };
 
+var carePlanMedicationInformation = {
+    key: "manufacturedProduct",
+    attributes: {
+        classCode: "MANU"
+    },
+    content: [
+        fieldLevel.templateIdExt("2.16.840.1.113883.10.20.22.4.23", "2014-06-09"),
+        fieldLevel.templateId("2.16.840.1.113883.10.20.22.4.23"),
+        {
+            key: "manufacturedMaterial",
+            content: [{
+                key: "code",
+                attributes: leafLevel.code,
+            }]
+        }
+    ]
+};
 exports.planOfCareActivitySubstanceAdministration = {
     key: "substanceAdministration",
     attributes: {
@@ -104,15 +249,21 @@ exports.planOfCareActivitySubstanceAdministration = {
         moodCode: "RQO"
     },
     content: [
+        fieldLevel.templateIdExt("2.16.840.1.113883.10.20.22.4.42", "2014-06-09"),
         fieldLevel.templateId("2.16.840.1.113883.10.20.22.4.42"),
         fieldLevel.uniqueId,
         fieldLevel.id, {
-            key: "code",
-            attributes: leafLevel.code,
+            key: "text",
+            text: leafLevel.input,
+            dataKey: "name"
+        },
+        fieldLevel.statusCodeActive,
+        fieldLevel.effectiveTime,
+        {
+            key: "consumable",
+            content: carePlanMedicationInformation,
             dataKey: "plan"
         },
-        fieldLevel.statusCodeNew,
-        fieldLevel.effectiveTime
     ],
     existsWhen: function (input) {
         return input.type === "substanceAdministration";
@@ -133,8 +284,9 @@ exports.planOfCareActivitySupply = {
             attributes: leafLevel.code,
             dataKey: "plan"
         },
-        fieldLevel.statusCodeNew,
-        fieldLevel.effectiveTime
+        fieldLevel.statusCodeActive,
+        fieldLevel.effectiveTime,
+        fieldLevel.author
     ],
     existsWhen: function (input) {
         return input.type === "supply";
@@ -142,7 +294,6 @@ exports.planOfCareActivitySupply = {
 };
 
 var goal = {
-
     key: "code",
     attributes: {
         "code": leafLevel.deepInputProperty("code"),
@@ -182,7 +333,7 @@ exports.planOfCareActivityInstructions = {
             attributes: leafLevel.code,
             dataKey: "plan"
         },
-        fieldLevel.statusCodeNew, {
+        fieldLevel.statusCodeActive, {
             key: "priorityCode",
             attributes: {
                 "code": leafLevel.deepInputProperty("code"),
@@ -194,7 +345,9 @@ exports.planOfCareActivityInstructions = {
             }],
             dataKey: "severity"
         },
-        fieldLevel.effectiveTime, {
+        fieldLevel.effectiveTime,
+        fieldLevel.author,
+        {
             key: "entryRelationship",
             attributes: {
                 typeCode: "COMP"

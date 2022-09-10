@@ -25,6 +25,7 @@ use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Csrf\CsrfUtils;
 use OpenEMR\Core\Header;
 use OpenEMR\MedicalDevice\MedicalDevice;
+use OpenEMR\Services\PatientIssuesService;
 
 // TBD - Resolve functional issues if opener is included in Header
 ?>
@@ -46,11 +47,11 @@ if (!empty($_POST['form_save'])) {
     $thisenc = $_POST['thisenc'];
 } else {
     $issue = $_REQUEST['issue'] ?? null;
-    $thispid = 0 + (empty($_REQUEST['thispid']) ? $pid : $_REQUEST['thispid']);
+    $thispid = (int) (empty($_REQUEST['thispid']) ? $pid : $_REQUEST['thispid']);
     // A nonempty thisenc means we are to link the issue to the encounter.
     $thisenc = 0 + (empty($_REQUEST['thisenc']) ? 0 : $_REQUEST['thisenc']);
 }
-
+// NOTE: $ISSUE_TYPES is defined in lists.inc
 if (isset($ISSUE_TYPES['ippf_gcac'])) {
     if ($ISSUE_TYPES['ippf_gcac']) {
         // Similarly for IPPF issues.
@@ -131,7 +132,10 @@ function ActiveIssueCodeRecycleFn($thispid2, $ISSUE_TYPES2)
 
     $codeList2 = array();
 
-    $issueCodes2 = sqlStatement("SELECT diagnosis FROM lists WHERE pid = ? AND enddate is NULL AND type IN ($qs2)", $sqlParameters2);
+    $issueCodes2 = sqlStatement(
+        "SELECT diagnosis FROM lists WHERE pid = ? AND enddate is NULL AND type IN ($qs2)",
+        $sqlParameters2
+    );
 
     while ($issueCodesRow2 = sqlFetchArray($issueCodes2)) {
         if ($issueCodesRow2['diagnosis'] != "") {
@@ -180,7 +184,14 @@ function ActiveIssueCodeRecycleFn($thispid2, $ISSUE_TYPES2)
         if ($displayCodeSet) {
             foreach ($displayCodeSet as $code) {
                 $text = getCodeText($code);
-                echo "listBoxOptionSets[" . attr($akey) . "][listBoxOptionSets[" . attr($akey) . "].length] = new Option(" . js_escape($text) . ", " . js_escape($code) . ", false, false);\n";
+                echo "listBoxOptionSets[" .
+                    attr($akey) .
+                    "][listBoxOptionSets[" .
+                    attr($akey) .
+                    "].length] = new Option(" .
+                    js_escape($text) .
+                    ", " . js_escape($code) .
+                    ", false, false);\n";
             }
         }
     }
@@ -230,86 +241,63 @@ if (!empty($_POST['form_save'])) {
         }
     }
 
-    $form_begin = ($_POST['form_begin']) ? DateToYYYYMMDD($_POST['form_begin']) : '';
-    $form_end   = ($_POST['form_end']) ? DateToYYYYMMDD($_POST['form_end']) : '';
+    $form_begin = !empty($_POST['form_begin']) ? DateTimeToYYYYMMDDHHMMSS($_POST['form_begin']) : null;
+    $form_end   = !empty($_POST['form_end']) ? DateTimeToYYYYMMDDHHMMSS($_POST['form_end']) : null;
+    $form_return = !empty($_POST['form_return']) ? DateToYYYYMMDD($_POST['form_return']) : null;
 
     $form_injury_part = $_POST['form_medical_system'] ?? '';
     $form_injury_type = $_POST['form_medical_type'] ?? '';
 
-    if ($issue) {
-        $query = "UPDATE lists SET " .
-            "type = '"        . add_escape_custom($text_type)                  . "', " .
-            "title = '"       . add_escape_custom($_POST['form_title'])        . "', " .
-            "udi = '"         . add_escape_custom($_POST['form_udi'])               . "', " .
-            "udi_data = '"    . add_escape_custom($_POST['udi_data'])          . "', " .
-            "comments = '"    . add_escape_custom($_POST['form_comments'])     . "', " .
-            "begdate = "      . QuotedOrNull($form_begin)   . ", "  .
-            "enddate = "      . QuotedOrNull($form_end)     . ", "  .
-            "returndate = "   . QuotedOrNull($form_return ?? null)  . ", "  .
-            "diagnosis = '"   . add_escape_custom($_POST['form_diagnosis'])    . "', " .
-            "occurrence = '"  . add_escape_custom($_POST['form_occur'])        . "', " .
-            "classification = '" . add_escape_custom($_POST['form_classification']) . "', " .
-            "reinjury_id = '" . add_escape_custom($_POST['form_reinjury_id'] ?? '')  . "', " .
-            "referredby = '"  . add_escape_custom($_POST['form_referredby'])   . "', " .
-            "injury_grade = '" . add_escape_custom($_POST['form_injury_grade'] ?? '') . "', " .
-            "injury_part = '" . add_escape_custom($form_injury_part)           . "', " .
-            "injury_type = '" . add_escape_custom($form_injury_type)           . "', " .
-            "outcome = '"     . add_escape_custom($_POST['form_outcome'])      . "', " .
-            "destination = '" . add_escape_custom($_POST['form_destination'])   . "', " .
-            "reaction ='"     . add_escape_custom($_POST['form_reaction'])     . "', " .
-            "verification ='"     . add_escape_custom($_POST['form_verification'])     . "', " .
-            "severity_al ='"     . add_escape_custom($_POST['form_severity_id'])     . "', " .
-            "list_option_id ='"     . add_escape_custom($_POST['form_title_id'])     . "', " .
-            "erx_uploaded = '0', " .
-            "modifydate = NOW() " .
-            "WHERE id = '" . add_escape_custom($issue) . "'";
-        sqlStatement($query);
-        if ($text_type == "medication" && enddate != '') {
-            sqlStatement(
-                'UPDATE prescriptions SET '
-                . 'medication = 0 where patient_id = ? '
-                . " and upper(trim(drug)) = ? "
-                . ' and medication = 1',
-                array($thispid, strtoupper($_POST['form_title']))
-            );
+    $issueRecord = [
+        'type' => $text_type
+        ,'begdate' => $form_begin ?? null
+        ,'enddate' => $form_end ?? null
+        ,'returndate' => $form_return ?? null
+        ,'erx_uploaded' => '0'
+        ,'id' => $issue ?? null
+        ,'pid' => $thispid
+    ];
+    // TODO: we could simplify this array by just adding 'form_' onto everything
+    // but not all of the fields precisely match so that would need to be fixed up
+    $issue_form_fields = [
+        'title' => 'form_title',
+        'udi' => 'form_udi',
+        'udi_data' => 'udi_data',
+        'comments' => 'form_comments',
+        'diagnosis' => 'form_diagnosis',
+        'occurrence' => 'form_occur',
+        'classification' => 'form_classification',
+        'reinjury_id' => 'form_reinjury_id',
+        'referredby' => 'form_referredby',
+        'injury_grade' => 'form_injury_grade',
+        'outcome' => 'form_outcome',
+        'destination' => 'form_destination',
+        'reaction' => 'form_reaction',
+        'verification' => 'form_verification',
+        'severity_al' => 'form_severity_id',
+        'list_option_id' => 'form_title_id',
+        'subtype' => 'form_subtype'
+    ];
+    foreach ($issue_form_fields as $field => $form_field) {
+        if (isset($_POST[$form_field])) {
+            $issueRecord[$field] = $_POST[$form_field];
         }
+    }
+
+    // now populate medication
+    if (isset($_POST['form_medication'])) {
+        $issueRecord['medication'] = $_POST['form_medication'];
+    }
+
+    $patientIssuesService = new PatientIssuesService();
+    if ($issue) {
+        $patientIssuesService->updateIssue($issueRecord);
     } else {
-        $issue = sqlInsert(
-            "INSERT INTO lists ( " .
-            "date, pid, type, title, udi, udi_data, activity, comments, begdate, enddate, returndate, " .
-            "diagnosis, occurrence, classification, referredby, user, groupname, " .
-            "outcome, destination, reinjury_id, injury_grade, injury_part, injury_type, " .
-            "reaction, verification, severity_al, list_option_id " .
-            ") VALUES ( " .
-            "NOW(), " .
-            "'" . add_escape_custom($thispid) . "', " .
-            "'" . add_escape_custom($text_type)                 . "', " .
-            "'" . add_escape_custom($_POST['form_title'])       . "', " .
-            "'" . add_escape_custom($_POST['form_udi'])              . "', " .
-            "'" . add_escape_custom($_POST['udi_data'])         . "', " .
-            "1, "                            .
-            "'" . add_escape_custom($_POST['form_comments'])    . "', " .
-            QuotedOrNull($form_begin)        . ", "  .
-            QuotedOrNull($form_end)        . ", "  .
-            QuotedOrNull($form_return ?? null)       . ", "  .
-            "'" . add_escape_custom($_POST['form_diagnosis'])   . "', " .
-            "'" . add_escape_custom($_POST['form_occur'])       . "', " .
-            "'" . add_escape_custom($_POST['form_classification']) . "', " .
-            "'" . add_escape_custom($_POST['form_referredby'])  . "', " .
-            "'" . add_escape_custom($_SESSION['authUser'])     . "', " .
-            "'" . add_escape_custom($_SESSION['authProvider']) . "', " .
-            "'" . add_escape_custom($_POST['form_outcome'])     . "', " .
-            "'" . add_escape_custom($_POST['form_destination']) . "', " .
-            "'" . add_escape_custom($_POST['form_reinjury_id'] ?? '') . "', " .
-            "'" . add_escape_custom($_POST['form_injury_grade'] ?? '') . "', " .
-            "'" . add_escape_custom($form_injury_part)          . "', " .
-            "'" . add_escape_custom($form_injury_type)          . "', " .
-            "'" . add_escape_custom($_POST['form_reaction'])         . "', " .
-            "'" . add_escape_custom($_POST['form_verification'])         . "', " .
-            "'" . add_escape_custom($_POST['form_severity_id'])         . "', " .
-            "'" . add_escape_custom($_POST['form_title_id'])         . "' " .
-            ")"
-        );
+        $issueRecord["date"] = date("Y-m-d H:m:s");
+        $issueRecord['activity'] = 1;
+        $issueRecord['user'] = $_SESSION['authUser'];
+        $issueRecord['groupname'] = $_SESSION['authProvider'];
+        $patientIssuesService->createIssue($issueRecord);
     }
 
     // For record/reporting purposes, place entry in lists_touch table.
@@ -353,7 +341,8 @@ if (!empty($_POST['form_save'])) {
 
 $irow = array();
 if ($issue) {
-    $irow = sqlQuery("SELECT * FROM lists WHERE id = ?", array($issue));
+    $patientIssuesService = new PatientIssuesService();
+    $irow = $patientIssuesService->getOneById($issue);
     if (!AclMain::aclCheckIssue($irow['type'], '', 'write')) {
         die(xlt("Edit is not authorized!"));
     }
@@ -421,9 +410,16 @@ function getCodeText($code)
         foreach ($ISSUE_TYPES as $key => $value) {
             echo " aitypes[" . attr($i) . "] = " . js_escape($value[3]) . ";\n";
             echo " aopts[" . attr($i) . "] = new Array();\n";
-            $qry = sqlStatement("SELECT * FROM list_options WHERE list_id = ? AND activity = 1", array($key . "_issue_list"));
+            $qry = sqlStatement(
+                "SELECT * FROM list_options WHERE list_id = ? AND activity = 1",
+                array($key . "_issue_list")
+            );
             while ($res = sqlFetchArray($qry)) {
-                echo " opt = new Option(" . js_escape(xl_list_label(trim($res['title']))) . ", " . js_escape(trim($res['option_id'])) . ", false, false);\n";
+                echo " opt = new Option(" .
+                    js_escape(xl_list_label(trim($res['title']))) .
+                    ", " .
+                    js_escape(trim($res['option_id'])) .
+                    ", false, false);\n";
                 echo " aopts[" . attr($i) . "][aopts[" . attr($i) . "].length] = opt\n";
                 if ($res['codes']) {
                     $codes = explode(";", $res['codes']);
@@ -620,14 +616,28 @@ function getCodeText($code)
                 $url .= urlencode(collect_codetypes("medical_problem", "csv"));
             } else {
                 $url .= urlencode(collect_codetypes("diagnosis", "csv"));
-                $tmp  = urlencode(collect_codetypes("drug", "csv"));
+                $tmp_csv = collect_codetypes("drug", "csv");
+                $tmp_csv .= "," . collect_codetypes("clinical_term", "csv");
+                $tmp = explode(",", $tmp_csv);
                 if (!empty($irow['type']) && ($irow['type'] == 'allergy')) {
                     if ($tmp) {
-                        $url .= ",$tmp";
+                        foreach ($tmp as $item) {
+                            $pos = strpos($url, $item);
+                            if ($pos === false) {
+                                $item = urlencode($item);
+                                $url .= ",$item";
+                            }
+                        }
                     }
                 } elseif (!empty($irow['type']) && ($irow['type'] == 'medication')) {
                     if ($tmp) {
-                        $url .= ",$tmp&default=$tmp";
+                        foreach ($tmp as $item) {
+                            $pos = strpos($url, $item);
+                            if ($pos === false) {
+                                $item = urlencode($item);
+                                $url .= ",$item&default=$item";
+                            }
+                        }
                     }
                 }
             }
@@ -732,7 +742,7 @@ function getCodeText($code)
 
         $(function() {
             $('.datepicker').datetimepicker({
-                <?php $datetimepicker_timepicker = false; ?>
+                <?php $datetimepicker_timepicker = true; ?>
                 <?php $datetimepicker_showseconds = false; ?>
                 <?php $datetimepicker_formatInput = true; ?>
                 <?php require $GLOBALS['srcdir'] . '/js/xl/jquery-datetimepicker-2-5-4.js.php'; ?>
@@ -866,15 +876,15 @@ function getCodeText($code)
                             </div>
                             <input type='hidden' class="form-control" name='form_diagnosis' id='form_diagnosis'
                                    value='<?php echo attr($irow['diagnosis'] ?? '') ?>' onclick='onAddCode()'
-                                   title='<?php echo xla('Click to select or change coding'); ?>' readonly >
+                                   title='<?php echo xla('Click to select or change coding'); ?>' readonly />
                         </div>
                         <div class="form-group col-12">
-                            <label class="col-form-label" for="form_begin"><?php echo xlt('Begin Date'); ?>:</label>
-                            <input type='text' class='datepicker form-control' name='form_begin' id='form_begin' value='<?php echo attr(oeFormatShortDate($irow['begdate'] ?? '')) ?>' title='<?php echo xla('yyyy-mm-dd date of onset, surgery or start of medication'); ?>' />
+                            <label class="col-form-label" for="form_begin"><?php echo xlt('Begin Date and Time'); ?>:</label>
+                            <input type='text' class='datepicker form-control' name='form_begin' id='form_begin' value='<?php echo attr(trim(oeFormatDateTime($irow['begdate'] ?? ''))) ?>' title='<?php echo xla('yyyy-mm-dd HH:MM date of onset, surgery or start of medication'); ?>' />
                         </div>
                         <div class="form-group col-12" id='row_enddate'>
-                            <label class="col-form-label" for="form_begin"><?php echo xlt('End Date'); ?>:</label>
-                            <input type='text' class='datepicker form-control' name='form_end' id='form_end' value='<?php echo attr(oeFormatShortDate($irow['enddate'] ?? '')) ?>' title='<?php echo xla('yyyy-mm-dd date of recovery or end of medication'); ?>' />
+                            <label class="col-form-label" for="form_begin"><?php echo xlt('End Date and Time'); ?>:</label>
+                            <input type='text' class='datepicker form-control' name='form_end' id='form_end' value='<?php echo attr(trim(oeFormatDateTime($irow['enddate'] ?? ''))) ?>' title='<?php echo xla('yyyy-mm-dd HH:MM date of recovery or end of medication'); ?>' />
                             &nbsp;(<?php echo xlt('leave blank if still active'); ?>)
                         </div>
                         <div class="form-group col-12" id='row_active'>
@@ -887,6 +897,12 @@ function getCodeText($code)
                             <input type='hidden' name='form_return' id='form_return' />
                             <input type='hidden' name='row_reinjury_id' id='row_reinjury_id' />
                             <img id='img_return' />
+                        </div>
+                        <div class="form-group col-12" id='row_subtype'>
+                            <label class="col-form-label" for="form_subtype"><?php echo xlt('Classification Type'); ?>:</label>
+                            <?php
+                            echo generate_select_list('form_subtype', 'issue_subtypes', ($irow['subtype'] ?? null), '', 'NA', '', '');
+                            ?>
                         </div>
                         <div class="form-group col-12" id='row_occurrence'>
                             <label class="col-form-label" for="form_occur"><?php echo xlt('Occurrence'); ?>:</label>
@@ -965,6 +981,12 @@ function getCodeText($code)
                                 <?php echo rbinput('form_destination', '4', 'GP via podiatry', 'destination') ?>
                             <?php } ?>
                         </div>
+
+                        <?php if (($irow['type'] ?? '') == 'medication') : ?>
+                            <!-- any medication specific issue information goes here -->
+                            <?php include "add_edit_issue_medication_fragment.php"; ?>
+                        <?php endif; ?>
+
                         <br />
                         <?php //can change position of buttons by creating a class 'position-override' and adding rule text-alig:center or right as the case may be in individual stylesheets
                         ?>

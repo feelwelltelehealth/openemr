@@ -315,10 +315,10 @@ class ApplicationTable extends AbstractTableGateway
 
                                       ));
         } elseif (strtolower($searchType) == 'emrdirect') {
-            $sql = "SELECT fname, mname, lname,email,id FROM users
+            $sql = "SELECT fname, mname, lname,email_direct AS 'email',id FROM users
                 WHERE (CONCAT(fname, ' ', lname) LIKE ?
                 OR  CONCAT(lname, ' ', fname) LIKE ?
-                OR email LIKE ?)
+                OR email_direct LIKE ?)
                 AND abook_type = 'emr_direct'
                 AND active = 1
                 ORDER BY fname ";
@@ -357,11 +357,32 @@ class ApplicationTable extends AbstractTableGateway
     public static function dateFormat($format = null)
     {
         if ($format == "0") {
-            $date_format = 'yyyy/mm/dd';
+            $date_format = 'yyyy-mm-dd';
         } elseif ($format == 1) {
             $date_format = 'mm/dd/yyyy';
         } elseif ($format == 2) {
             $date_format = 'dd/mm/yyyy';
+        } else {
+            $date_format = $format;
+        }
+
+        return $date_format;
+    }
+
+    /*
+    * Retrive the data format from GLOBALS
+    *
+    * @param    Date format set in GLOBALS
+    * @return   Date format in datepicker
+    **/
+    public static function datePickerFormat($format = null)
+    {
+        if ($format == "0") {
+            $date_format = 'yy-mm-dd';
+        } elseif ($format == 1) {
+            $date_format = 'mm/dd/yy';
+        } elseif ($format == 2) {
+            $date_format = 'dd/mm/yy';
         } else {
             $date_format = $format;
         }
@@ -373,7 +394,7 @@ class ApplicationTable extends AbstractTableGateway
     * @param String $input_date Date to be converted
     * @param String $date_format Target Date Format
     */
-    public function fixDate($input_date, $output_format = null, $input_format = null)
+    public static function fixDate($input_date, $output_format = null, $input_format = null)
     {
         if (!$input_date) {
             return;
@@ -406,7 +427,7 @@ class ApplicationTable extends AbstractTableGateway
 
         $output_date = implode($seperator_output, $output_date_arr);
 
-        $output_date = $temp[1] ? $output_date . " " . $temp[1] : $output_date; //append the time, if exists, with the new formatted date
+        $output_date = (!empty($temp[1])) ? $output_date . " " . $temp[1] : $output_date; //append the time, if exists, with the new formatted date
         return $output_date;
     }
 

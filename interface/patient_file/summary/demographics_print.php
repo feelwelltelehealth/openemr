@@ -33,7 +33,7 @@ use OpenEMR\Common\Acl\AclMain;
 
 $patientid = empty($_REQUEST['patientid']) ? 0 : 0 + $_REQUEST['patientid'];
 if ($patientid < 0) {
-    $patientid = 0 + $pid; // -1 means current pid
+    $patientid = (int) $pid; // -1 means current pid
 }
 
 // True if to display as a form to complete, false to display as information.
@@ -401,7 +401,7 @@ if (strlen($last_group) > 0) {
 if ($PDF_OUTPUT) {
     $content = getContent();
     $pdf->writeHTML($content);
-    $pdf->Output('Demographics_form.pdf', 'D'); // D = Download, I = Inline
+    $pdf->Output('Demographics_form.pdf', 'I'); // D = Download, I = Inline
 } else {
     ?>
 <!-- This should really be in the onload handler but that seems to be unreliable and can crash Firefox 3. -->

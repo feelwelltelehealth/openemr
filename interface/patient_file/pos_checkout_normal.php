@@ -55,9 +55,15 @@ require_once("../../custom/code_types.inc.php");
 use OpenEMR\Billing\BillingUtilities;
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Csrf\CsrfUtils;
+use OpenEMR\Common\Twig\TwigContainer;
 use OpenEMR\Core\Header;
 use OpenEMR\OeUI\OemrUI;
 use OpenEMR\Services\FacilityService;
+
+if (!AclMain::aclCheckCore('acct', 'bill', '', 'write')) {
+    echo (new TwigContainer(null, $GLOBALS['kernel']))->getTwig()->render('core/unauthorized.html.twig', ['pageTitle' => xl("Patient Checkout")]);
+    exit;
+}
 
 $facilityService = new FacilityService();
 
@@ -155,7 +161,7 @@ function generate_receipt($patient_id, $encounter = 0)
         }
     }
 
-    if ($encprovider) {
+    if (!empty($encprovider)) {
         $providerrow = sqlQuery("SELECT fname, mname, lname, title, street, streetb, " .
         "city, state, zip, phone, fax FROM users WHERE id = ?", array($encprovider));
     }
@@ -305,7 +311,7 @@ function generate_receipt($patient_id, $encounter = 0)
                             <td colspan='5'>&nbsp;</td>
                         </tr>
                         <tr>
-                            <td><?php echo text(oeFormatShortDate($svcdispdate)); ?></td>
+                            <td><?php echo text(oeFormatShortDate($svcdispdate ?? '')); ?></td>
                             <td><b><?php echo xlt('Total Charges'); ?></b></td>
                             <td class='text-right'>&nbsp;</td>
                             <td class='text-right'>&nbsp;</td>
@@ -437,10 +443,10 @@ function generate_receipt($patient_id, $encounter = 0)
     // Print receipt header for facility
     function printFacilityHeader($frow)
     {
-        echo text($frow['name']) .
-        "<br />" . text($frow['street']) .
-        "<br />" . text($frow['city']) . ', ' . text($frow['state']) . ' ' . text($frow['postal_code']) .
-        "<br />" . text($frow['phone']) .
+        echo text($frow['name'] ?? '') .
+        "<br />" . text($frow['street'] ?? '') .
+        "<br />" . text($frow['city'] ?? '') . ', ' . text($frow['state'] ?? '') . ' ' . text($frow['postal_code'] ?? '') .
+        "<br />" . text($frow['phone'] ?? '') .
         "<br />&nbsp" .
         "<br />";
     }
@@ -580,7 +586,11 @@ function generate_receipt($patient_id, $encounter = 0)
             if ($GLOBALS['discount_by_money']) {
                 $amount  = sprintf('%01.2f', trim($_POST['form_discount']));
             } else {
-                $amount  = sprintf('%01.2f', trim($_POST['form_discount']) * $form_amount / 100);
+                $form_discount = trim($_POST['form_discount']) ?? 0;
+                if ($form_discount < 100) {
+                    $total_discount = $form_discount * $form_amount / (100 - $form_discount);
+                    $amount = sprintf('%01.2f', $total_discount);
+                }
             }
             $memo = xl('Discount');
             sqlBeginTrans();

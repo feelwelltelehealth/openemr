@@ -18,7 +18,10 @@ require_once("$srcdir/encounter.inc");
 
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Csrf\CsrfUtils;
+use OpenEMR\Services\CodeTypesService;
+use OpenEMR\Services\EncounterService;
 use OpenEMR\Services\FacilityService;
+use OpenEMR\Services\ListService;
 
 if (!CsrfUtils::verifyCsrfToken($_POST["csrf_token_form"])) {
     CsrfUtils::csrfNotVerified();
@@ -26,12 +29,12 @@ if (!CsrfUtils::verifyCsrfToken($_POST["csrf_token_form"])) {
 
 $facilityService = new FacilityService();
 
-$date = isset($_POST['form_date']) ? DateToYYYYMMDD($_POST['form_date']) : null;
-$onset_date = isset($_POST['form_onset_date']) ? DateToYYYYMMDD($_POST['form_onset_date']) : null;
+$date = isset($_POST['form_date']) ? DateTimeToYYYYMMDDHHMMSS($_POST['form_date']) : null;
+$onset_date = isset($_POST['form_onset_date']) ? DateTimeToYYYYMMDDHHMMSS($_POST['form_onset_date']) : null;
 $sensitivity = $_POST['form_sensitivity'] ?? null;
 $pc_catid = $_POST['pc_catid'] ?? null;
 $facility_id = $_POST['facility_id'] ?? null;
-$billing_facility = $_POST['billing_facility'] ?? null;
+$billing_facility = $_POST['billing_facility'] ?? '';
 $reason = $_POST['reason'] ?? null;
 $mode = $_POST['mode'] ?? null;
 $referral_source = $_POST['form_referral_source'] ?? null;
@@ -39,8 +42,12 @@ $class_code = $_POST['class_code'] ?? null;
 $pos_code = $_POST['pos_code'] ?? null;
 $parent_enc_id = $_POST['parent_enc_id'] ?? null;
 $encounter_provider = $_POST['provider_id'] ?? null;
+$referring_provider_id = $_POST['referring_provider_id'] ?? null;
 //save therapy group if exist in external_id column
 $external_id = isset($_POST['form_gid']) ? $_POST['form_gid'] : '';
+
+$discharge_disposition = $_POST['discharge_disposition'] ?? null;
+$discharge_disposition = $discharge_disposition != '_blank' ? $discharge_disposition : null;
 
 $facilityresult = $facilityService->getById($facility_id);
 $facility = $facilityresult['name'];
@@ -51,6 +58,24 @@ $nexturl = $normalurl;
 
 $provider_id = $_SESSION['authUserID'] ? $_SESSION['authUserID'] : 0;
 $provider_id = $encounter_provider ? $encounter_provider : $provider_id;
+
+$encounter_type = $_POST['encounter_type'] ?? '';
+$encounter_type_code = null;
+$encounter_type_description = null;
+// we need to lookup the codetype and the description from this if we have one
+if (!empty($encounter_type)) {
+    $listService = new ListService();
+    $option = $listService->getListOption('encounter-types', $encounter_type);
+    $encounter_type_code = $option['codes'] ?? null;
+    if (!empty($encounter_type_code)) {
+        $codeService = new CodeTypesService();
+        $encounter_type_description = $codeService->lookup_code_description($encounter_type_code) ?? null;
+    } else {
+        // we don't have any codes installed here so we will just use the encounter_type
+        $encounter_type_code = $encounter_type;
+        $encounter_type_description = $option['title'];
+    }
+}
 
 if ($mode == 'new') {
     $encounter = generate_id();
@@ -74,7 +99,11 @@ if ($mode == 'new') {
                 class_code = ?,
                 external_id = ?,
                 parent_encounter_id = ?,
-                provider_id = ?",
+                provider_id = ?,
+                discharge_disposition = ?,
+                referring_provider_id = ?,
+                encounter_type_code = ?,
+                encounter_type_description = ?",
             [
                 $date,
                 $onset_date,
@@ -92,6 +121,10 @@ if ($mode == 'new') {
                 $external_id,
                 $parent_enc_id,
                 $provider_id,
+                $discharge_disposition,
+                $referring_provider_id,
+                $encounter_type_code,
+                $encounter_type_description
             ]
         ),
         "newpatient",
@@ -127,6 +160,10 @@ if ($mode == 'new') {
         $referral_source,
         $class_code,
         $pos_code,
+        $discharge_disposition,
+        $referring_provider_id,
+        $encounter_type_code,
+        $encounter_type_description,
         $id
     );
     sqlStatement(
@@ -142,7 +179,12 @@ if ($mode == 'new') {
             sensitivity = ?,
             referral_source = ?,
             class_code = ?,
-            pos_code = ? WHERE id = ?",
+            pos_code = ?,
+            discharge_disposition = ?,
+            referring_provider_id = ?,
+            encounter_type_code = ?,
+            encounter_type_description = ?
+            WHERE id = ?",
         $sqlBindArray
     );
 } else {

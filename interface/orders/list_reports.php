@@ -26,15 +26,23 @@ if (file_exists("$include_root/procedure_tools/quest/QuestResultClient.php")) {
 require_once("./receive_hl7_results.inc.php");
 require_once("./gen_hl7_order.inc.php");
 
+use OpenEMR\Common\Acl\AclMain;
+use OpenEMR\Common\Twig\TwigContainer;
+use OpenEMR\Core\Header;
+
+// Check authorization.
+$thisauth = AclMain::aclCheckCore('patients', 'med');
+if (!$thisauth) {
+    echo (new TwigContainer(null, $GLOBALS['kernel']))->getTwig()->render('core/unauthorized.html.twig', ['pageTitle' => xl("Procedure Orders and Reports")]);
+    exit;
+}
+
 $form_patient = !empty($_POST['form_patient']);
 $processing_lab = $_REQUEST['form_lab_id'] ?? '';
 $start_form = false;
 if (!isset($_REQUEST['form_refresh']) && !isset($_REQUEST['form_process_labs']) && !isset($_REQUEST['form_manual'])) {
     $start_form = true;
 }
-
-use OpenEMR\Common\Acl\AclMain;
-use OpenEMR\Core\Header;
 
 /**
  * Get a list item title, translating if required.
@@ -73,17 +81,11 @@ function myCellText($s)
     return text($s);
 }
 
-// Check authorization.
-$thisauth = AclMain::aclCheckCore('patients', 'med');
-if (!$thisauth) {
-    die(xlt('Not authorized'));
-}
-
 $errmsg = '';
 
 // Send selected unsent orders if requested. This does not support downloading
 // very well as it will only send the first of those.
-if ($_POST['form_xmit']) {
+if (!empty($_POST['form_xmit'])) {
     foreach ($_POST['form_cb'] as $formid) {
         $row = sqlQuery("SELECT lab_id FROM procedure_order WHERE procedure_order_id = ?", array($formid));
         $ppid = (int)$row['lab_id'];
@@ -207,19 +209,14 @@ function doWait(e){
                     <select name='form_lab_id' id='form_lab_id' class='form-control'>
                         <option value="0"><?php echo xlt('All Labs'); ?></option>
                         <?php
-                        $qflag = false;
                         $ppres = sqlStatement("SELECT ppid, name, npi FROM procedure_providers ORDER BY name, ppid");
                         while ($pprow = sqlFetchArray($ppres)) {
-                            if ($qflag) {
-                                continue;
-                            }
                             echo "<option value='" . attr($pprow['ppid']) . "'";
                             if ($pprow['ppid'] == $processing_lab) {
                                 echo " selected";
                             }
                             if (stripos($pprow['npi'], 'QUEST') !== false) {
                                 $pprow['name'] = "Quest Diagnostics";
-                                $qflag = true;
                             }
                             echo ">" . text($pprow['name']) . "</option>";
                         }
@@ -232,7 +229,7 @@ function doWait(e){
                         style="max-width:75px;margin-left:20px;"
                         type="number" title="<?php echo xla('Max number of results to process at a time per Lab') ?>"
                         step="1" min="0" max="50"
-                        value="<?php echo attr($_REQUEST['form_max_results'] ?: 10); ?>" />
+                        value="<?php echo attr($_REQUEST['form_max_results'] ?? 10); ?>" />
                         <span class="input-group-text"><?php echo xlt('Results Per Lab'); ?></span>
                     </div>
                     <div class="form-check form-check-inline ml-2">
@@ -261,13 +258,13 @@ function doWait(e){
     // might be a nasty surprise.
     if (empty($_POST['form_external_refresh'])) {
         // Get patient matching selections from this form if there are any.
-        if (is_array($_POST['select'])) {
+        if (!empty($_POST['select']) && is_array($_POST['select'])) {
             foreach ($_POST['select'] as $selkey => $selval) {
-                $info['select'][$selkey] = $selval;
+                $info['select'][urldecode($selkey)] = $selval;
             }
         }
         // Get file delete requests from this form if there are any.
-        if (is_array($_POST['delete'])) {
+        if (!empty($_POST['delete']) && is_array($_POST['delete'])) {
             foreach ($_POST['delete'] as $delkey => $dummy) {
                 $info[$delkey] = array('delete' => true);
             }
@@ -279,7 +276,7 @@ function doWait(e){
         $info['orphaned_order'] = "R";
     }
     // Attempt to post any incoming results.
-    if ($_REQUEST['form_process_labs'] || $info['orphaned_order'] == "R") {
+    if (!empty($_REQUEST['form_process_labs']) || (!empty($info['orphaned_order']) && $info['orphaned_order'] == "R")) {
         $errmsg = poll_hl7_results($info, $processing_lab);
     }
     // echo "<!--\n";  // debugging
@@ -293,7 +290,7 @@ function doWait(e){
     $orphan_orders = false;
 
     // Generate HTML to request patient matching.
-    if (is_array($info['match'])) {
+    if (!empty($info['match']) && is_array($info['match'])) {
         foreach ($info['match'] as $matchkey => $matchval) {
             $matchreqs = true;
             $s .= " <tr class='detail'>\n";
@@ -317,7 +314,7 @@ function doWait(e){
         }
 
         $count = 0;
-        if (is_array($infoval['mssgs'])) {
+        if (is_array($infoval) && !empty($infoval['mssgs'])) {
             foreach ($infoval['mssgs'] as $message) {
                 $s .= " <tr class='detail'>\n";
                 if (substr($message, 0, 1) == '*') {
@@ -521,11 +518,11 @@ function doWait(e){
 
             if ($form_reviewed == 2) {
                 $where .= " AND pr.procedure_report_id IS NOT NULL AND pr.review_status = 'reviewed'";
-            } else if ($form_reviewed == 3) {
+            } elseif ($form_reviewed == 3) {
                 $where .= " AND pr.procedure_report_id IS NOT NULL AND pr.review_status != 'reviewed'";
-            } else if ($form_reviewed == 4) {
+            } elseif ($form_reviewed == 4) {
                 $where .= " AND po.date_transmitted IS NOT NULL AND pr.procedure_report_id IS NULL";
-            } else if ($form_reviewed == 5) {
+            } elseif ($form_reviewed == 5) {
                 $where .= " AND po.date_transmitted IS NULL AND pr.procedure_report_id IS NULL";
             }
 
@@ -658,7 +655,7 @@ function doWait(e){
             }
         } ?>
     </table>
-    <?php if ($num_checkboxes) { ?>
+    <?php if (!empty($num_checkboxes)) { ?>
         <button type="submit" class="btn btn-primary btn-transmit" name='form_xmit'
             value='<?php echo xla('Transmit Selected Orders'); ?>'><?php echo xlt('Transmit Selected Orders'); ?>
         </button>

@@ -27,40 +27,14 @@ require_once("../globals.php");
 
 use OpenEMR\Common\Csrf\CsrfUtils;
 use OpenEMR\Core\Header;
+use OpenEMR\Services\InsuranceCompanyService;
 
 // Putting a message here will cause a popup window to display it.
 $info_msg = "";
 
-// This is copied from InsuranceCompany.class.php.  It should
-// really be in a SQL table.
-$ins_type_code_array = array(''
-  , xl('Other HCFA')
-  , xl('Medicare Part B')
-  , xl('Medicaid')
-  , xl('ChampUSVA')
-  , xl('ChampUS')
-  , xl('Blue Cross Blue Shield')
-  , xl('FECA')
-  , xl('Self Pay')
-  , xl('Central Certification')
-  , xl('Other Non-Federal Programs')
-  , xl('Preferred Provider Organization (PPO)')
-  , xl('Point of Service (POS)')
-  , xl('Exclusive Provider Organization (EPO)')
-  , xl('Indemnity Insurance')
-  , xl('Health Maintenance Organization (HMO) Medicare Risk')
-  , xl('Automobile Medical')
-  , xl('Commercial Insurance Co.')
-  , xl('Disability')
-  , xl('Health Maintenance Organization')
-  , xl('Liability')
-  , xl('Liability Medical')
-  , xl('Other Federal Program')
-  , xl('Title V')
-  , xl('Veterans Administration Plan')
-  , xl('Workers Compensation Health Plan')
-  , xl('Mutually Defined')
-);
+// Grab insurance type codes from service
+$insuranceCompany = new InsuranceCompanyService();
+$ins_type_code_array = $insuranceCompany->getInsuranceTypes();
 
 ?>
 <html>
@@ -156,7 +130,7 @@ td {
 <?php
  // If we are saving, then save and close the window.
  //
-if ($_POST['form_save']) {
+if ($_POST['form_save'] ?? '') {
     if (!CsrfUtils::verifyCsrfToken($_POST["csrf_token_form"])) {
         CsrfUtils::csrfNotVerified();
     }
@@ -168,32 +142,25 @@ if ($_POST['form_save']) {
        // sql for updating could go here if this script is enhanced to support
        // editing of existing insurance companies.
     } else {
-        $ins_id = generate_id();
-
-        sqlStatement("INSERT INTO insurance_companies ( " .
-        "id, name, attn, cms_id, ins_type_code, x12_receiver_id, x12_default_partner_id " .
-        ") VALUES ( " .
-        "'" . add_escape_custom($ins_id)                   . "', " .
-        "'" . add_escape_custom($ins_name)                 . "', " .
-        "'" . add_escape_custom($_POST['form_attn'])       . "', " .
-        "'" . add_escape_custom($_POST['form_cms_id'])     . "', " .
-        "'" . add_escape_custom($_POST['form_ins_type_code']) . "', " .
-        "'" . add_escape_custom($_POST['form_partner'])    . "', " .
-        "'" . add_escape_custom($_POST['form_partner'])    . "' "  .
-        ")");
-
-        sqlStatement("INSERT INTO addresses ( " .
-        "id, line1, line2, city, state, zip, country, foreign_id " .
-        ") VALUES ( " .
-        "'" . add_escape_custom(generate_id())          . "', " .
-        "'" . add_escape_custom($_POST['form_addr1'])   . "', " .
-        "'" . add_escape_custom($_POST['form_addr2'])   . "', " .
-        "'" . add_escape_custom($_POST['form_city'])    . "', " .
-        "'" . add_escape_custom($_POST['form_state'])   . "', " .
-        "'" . add_escape_custom($_POST['form_zip'])     . "', " .
-        "'" . add_escape_custom($_POST['form_country']) . "', " .
-        "'" . add_escape_custom($ins_id)                . "' " .
-        ")");
+        $ins_id = $insuranceCompany->insert(
+            array(
+                'name' => $ins_name,
+                'attn' => $_POST['form_attn'],
+                'cms_id' => $_POST['form_cms_id'],
+                'ins_type_code' => $_POST['form_ins_type_code'],
+                'x12_receiver_id' => $_POST['form_partner'],
+                'x12_default_parter_id' => $_POST['form_partner'],
+                'alt_cms_id' => null,
+                'line1' => $_POST['form_addr1'],
+                'line2' => $_POST['form_addr2'],
+                'city' => $_POST['form_city'],
+                'state' => $_POST['form_state'],
+                'zip' => $_POST['form_zip'],
+                'country' => $_POST['form_country'],
+                'foreign_id' => $ins_id,
+                'cqm_sop' => $_POST['form_cqm_sop']
+            )
+        );
 
         $phone_parts = array();
         preg_match(
@@ -202,17 +169,19 @@ if ($_POST['form_save']) {
             $phone_parts
         );
 
-        sqlStatement("INSERT INTO phone_numbers ( " .
-        "id, country_code, area_code, prefix, number, type, foreign_id " .
-        ") VALUES ( " .
-        "'" . add_escape_custom(generate_id())   . "', " .
-        "'+1'"                . ", "  .
-        "'" . add_escape_custom($phone_parts[1]) . "', " .
-        "'" . add_escape_custom($phone_parts[2]) . "', " .
-        "'" . add_escape_custom($phone_parts[3]) . "', " .
-        "'2'"                 . ", "  .
-        "'" . add_escape_custom($ins_id)         . "' "  .
-        ")");
+        if (!empty($phone_parts)) {
+            sqlStatement("INSERT INTO phone_numbers ( " .
+            "id, country_code, area_code, prefix, number, type, foreign_id " .
+            ") VALUES ( " .
+            "'" . add_escape_custom(generate_id())   . "', " .
+            "'+1'"                . ", "  .
+            "'" . add_escape_custom($phone_parts[1] ?? '') . "', " .
+            "'" . add_escape_custom($phone_parts[2] ?? '') . "', " .
+            "'" . add_escape_custom($phone_parts[3] ?? '') . "', " .
+            "'2'"                 . ", "  .
+            "'" . add_escape_custom($ins_id)         . "' "  .
+            ")");
+        }
     }
 
   // Close this window and tell our opener to select the new company.
@@ -314,7 +283,6 @@ if ($_POST['form_save']) {
 <?php
 for ($i = 1; $i < count($ins_type_code_array); ++$i) {
     echo "   <option value='" . attr($i) . "'";
-  // if ($i == $row['ins_type_code']) echo " selected";
     echo ">" . text($ins_type_code_array[$i]) . "\n";
 }
 ?>
@@ -330,8 +298,23 @@ for ($i = 1; $i < count($ins_type_code_array); ++$i) {
 <?php
 while ($xrow = sqlFetchArray($xres)) {
     echo "   <option value='" . attr($xrow['id']) . "'";
-  // if ($xrow['id'] == $row['x12_default_partner_id']) echo " selected";
     echo ">" . text($xrow['name']) . "</option>\n";
+}
+?>
+   </select>
+  </td>
+ </tr>
+
+ <tr>
+  <td class="font-weight-bold" nowrap><?php echo xlt('CQM Source of Payment'); ?>:</td>
+  <td>
+   <select name='form_cqm_sop' title='CQM Source of Payment' class="form-control form-control-sm">
+    <option value=""><?php echo '-- ' . xlt('None{{CQM SOP}}') . ' --'; ?></option>
+<?php
+$cqm_sop_array = $insuranceCompany->getInsuranceCqmSop();
+foreach ($cqm_sop_array as $key => $value) {
+    echo "   <option value='" . attr($key) . "'";
+    echo ">" . text($value) . "</option>\n";
 }
 ?>
    </select>

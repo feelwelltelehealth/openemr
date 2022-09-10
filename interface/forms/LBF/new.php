@@ -8,21 +8,20 @@
  * @author    Rod Roark <rod@sunsetsystems.com>
  * @author    Brady Miller <brady.g.miller@gmail.com>
  * @author    Jerry Padgett <sjpadgett@gmail.com>
- * @copyright Copyright (c) 2009-2021 Rod Roark <rod@sunsetsystems.com>
+ * @copyright Copyright (c) 2009-2022 Rod Roark <rod@sunsetsystems.com>
  * @copyright Copyright (c) 2019 Brady Miller <brady.g.miller@gmail.com>
  * @copyright Copyright (c) 2018-2020 Jerry Padgett <sjpadgett@gmail.com>
  * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
  */
 
-if (isset($_GET['isPortal']) && (int)$_GET['isPortal'] !== 0) {
-    require_once(__DIR__ . "/../../../src/Common/Session/SessionUtil.php");
-    OpenEMR\Common\Session\SessionUtil::portalSessionStart();
-    if (isset($_SESSION['pid']) && isset($_SESSION['patient_portal_onsite_two'])) {
-        $ignoreAuth_onsite_portal = true;
-    } else {
-        OpenEMR\Common\Session\SessionUtil::portalSessionCookieDestroy();
-        exit;
-    }
+// since need this class before autoloader, need to manually include it and then set it in line below with use command
+require_once(__DIR__ . "/../../../src/Common/Forms/CoreFormToPortalUtility.php");
+use OpenEMR\Common\Forms\CoreFormToPortalUtility;
+
+// block of code to securely support use by the patient portal
+$patientPortalSession = CoreFormToPortalUtility::isPatientPortalSession($_GET);
+if ($patientPortalSession) {
+    $ignoreAuth_onsite_portal = true;
 }
 
 require_once("../../globals.php");
@@ -45,39 +44,46 @@ $alertmsg = '';
 
 function end_cell()
 {
-    global $item_count, $cell_count, $historical_ids;
+    global $item_count, $historical_ids, $USING_BOOTSTRAP;
     if ($item_count > 0) {
-        // echo "&nbsp;</td>";
-        echo "</td>";
-
+        echo $USING_BOOTSTRAP ? "</div>" : "</td>";
         foreach ($historical_ids as $key => $dummy) {
-            // $historical_ids[$key] .= "&nbsp;</td>";
+            // If $USING_BOOTSTRAP this won't happen.
             $historical_ids[$key] .= "</td>";
         }
-
         $item_count = 0;
     }
 }
 
 function end_row()
 {
-    global $cell_count, $CPR, $historical_ids;
+    global $cell_count, $CPR, $historical_ids, $USING_BOOTSTRAP;
     end_cell();
-    if ($cell_count > 0) {
-        for (; $cell_count < $CPR; ++$cell_count) {
-            echo "<td class='border-top-0'></td>";
-            foreach ($historical_ids as $key => $dummy) {
-                $historical_ids[$key] .= "<td class='border-top-0'></td>";
+    if ($USING_BOOTSTRAP) {
+        if ($cell_count > 0 && $cell_count < $CPR) {
+            // Create a cell occupying the remaining bootstrap columns.
+            // BS columns will be less than 12 if $CPR is not 2, 3, 4, 6 or 12.
+            $bs_cols_remaining = ($CPR - $cell_count) * intval(12 / $CPR);
+            echo "<div class='$BS_COL_CLASS-$bs_cols_remaining'></div>";
+        }
+        if ($cell_count > 0) {
+            echo "</div><!-- End BS row -->\n";
+        }
+    } else {
+        if ($cell_count > 0) {
+            for (; $cell_count < $CPR; ++$cell_count) {
+                echo "<td class='border-top-0'></td>";
+                foreach ($historical_ids as $key => $dummy) {
+                    $historical_ids[$key] .= "<td class='border-top-0'></td>";
+                }
             }
+            foreach ($historical_ids as $key => $dummy) {
+                echo $historical_ids[$key];
+            }
+            echo "</tr>\n";
         }
-
-        foreach ($historical_ids as $key => $dummy) {
-            echo $historical_ids[$key];
-        }
-
-        echo "</tr>\n";
-        $cell_count = 0;
     }
+    $cell_count = 0;
 }
 
 // $is_lbf is defined in trend_form.php and indicates that we are being
@@ -108,6 +114,15 @@ if ($form_origin !== null) {
 }
 $is_core = !($portal_form_pid || $patient_portal || $is_portal_dashboard || $is_portal_module);
 
+if ($patientPortalSession && !empty($formid)) {
+    $pidForm = sqlQuery("SELECT `pid` FROM `forms` WHERE `form_id` = ? AND `formdir` = ?", [$formid, $formname])['pid'];
+    if (empty($pidForm) || ($pidForm != $_SESSION['pid'])) {
+        echo xlt("illegal Action");
+        OpenEMR\Common\Session\SessionUtil::portalSessionCookieDestroy();
+        exit;
+    }
+}
+
 $visitid = (int)(empty($_GET['visitid']) ? $encounter : $_GET['visitid']);
 
 // If necessary get the encounter from the forms table entry for this form.
@@ -133,6 +148,14 @@ $lobj = $grparr[''];
 $formtitle = $lobj['grp_title'];
 $formhistory = 0 + $lobj['grp_repeats'];
 $grp_last_update = $lobj['grp_last_update'];
+
+// When the layout specifies display of historical values of input fields,
+// we abandon responsive design of the form and instead present it in a
+// horizontally scrollable table. There seems no better way to show the
+// history on small devices, and in this case the form will be designed for
+// data entry on the left side anyway.
+//
+$USING_BOOTSTRAP = empty($formhistory);
 
 if (!empty($lobj['grp_columns'])) {
     $CPR = (int)$lobj['grp_columns'];
@@ -222,6 +245,7 @@ if (
         );
     }
 
+    $newhistorydata = array();
     $sets = "";
     $fres = sqlStatement("SELECT * FROM layout_options " .
         "WHERE form_id = ? AND uor > 0 AND field_id != '' AND " .
@@ -250,8 +274,9 @@ if (
         if ($source == 'D' || $source == 'H') {
             // Save to patient_data, employer_data or history_data.
             if ($source == 'H') {
-                $new = array($field_id => $value);
-                updateHistoryData($pid, $new);
+                // Do not call updateHistoryData() here! That would create multiple rows
+                // in the history_data table for a single form save.
+                $newhistorydata[$field_id] = $value;
             } elseif (strpos($field_id, 'em_') === 0) {
                 $field_id = substr($field_id, 3);
                 $new = array($field_id => $value);
@@ -308,6 +333,11 @@ if (
         }
     } // end while save
 
+    // Save any history data that was collected above.
+    if (!empty($newhistorydata)) {
+        updateHistoryData($pid, $newhistorydata);
+    }
+
     if ($portalid) {
         // Delete the request from the portal.
         $result = cms_portal_call(array('action' => 'delpost', 'postid' => $portalid));
@@ -362,6 +392,7 @@ if (
     }
 }
 ?>
+<!DOCTYPE html>
 <html>
 <head>
     <?php Header::setupHeader(['opener', 'common', 'datetime-picker', 'select2']); ?>
@@ -642,7 +673,7 @@ if (
                 top.restoreSession();
             }
 
-            return true;
+            return errMsgs.length == 0;
         }
 
         // Called to open the data entry form of a specified encounter form instance.
@@ -856,9 +887,9 @@ if (
 </head>
 
 <body class="body_top"<?php if ($from_issue_form) {
-    echo " style='background-color:var(--white)'";
-                      } ?>>
-    <div class="container-fluid">
+    echo " style='background-color:var(--white)'"; } ?>>
+    <!-- Set as a container until xl breakpoint then make fluid. -->
+    <div class="container-xl">
         <?php
         // form-inline is more consistent with the fact that LBFs are not designed for
         // small devices. In particular we prefer horizontal arrangement of multiple
@@ -868,7 +899,8 @@ if (
             "onsubmit='return validate(this)'>\n";
         ?>
         <!-- row width will size to col content width -->
-        <div class="row">
+        <!-- We need all possible viewport width sjp w-100 -->
+        <div class="row w-100 overflow-auto">
             <div class="col-12">
                 <?php
                 $cmsportal_login = '';
@@ -1065,7 +1097,7 @@ if (
                     // If ending a group or starting a subgroup, terminate the current row and its table.
                     if ($group_table_active && ($i != strlen($group_levels) || $i != strlen($this_levels))) {
                         end_row();
-                        echo " </table>\n";
+                        echo $USING_BOOTSTRAP ? " </div>\n" : " </table>\n";
                         $group_table_active = false;
                     }
 
@@ -1083,7 +1115,7 @@ if (
                     while ($i < strlen($this_levels)) {
                         end_row();
                         if ($group_table_active) {
-                            echo " </table>\n";
+                            echo $USING_BOOTSTRAP ? " </div>\n" : " </table>\n";
                             $group_table_active = false;
                         }
                         $group_levels .= $this_levels[$i++];
@@ -1110,65 +1142,89 @@ if (
                         }
 
                         $group_table_active = true;
-                        echo " <table cellspacing='0' cellpadding='0' class='border-0 lbfdata'>\n";
 
-                        if ($subtitle) {
-                            // There is a group subtitle so show it.
-                            echo "<tr><td class='font-weight-bold border-top-0 text-primary' colspan='" . attr($CPR) . "'>" . text($subtitle) . "</td></tr>\n";
-                            echo "<tr><td class='font-weight-bold border-top-0' style='height:0.3125rem;' colspan='" . attr($CPR) . "'></td></tr>\n";
-                        }
 
-                        // $display_style = 'none';
-
-                        // Initialize historical data array and write date headers.
                         $historical_ids = array();
-                        if ($formhistory > 0) {
-                            echo " <tr>";
-                            echo "<td colspan='" . attr($CPR) . "' class='font-weight-bold border-top-0 text-right'>";
-                            if (empty($is_lbf)) {
-                                // Including actual date per IPPF request 2012-08-23.
-                                echo text(oeFormatShortDate(substr($enrow['date'], 0, 10)));
-                                echo ' (' . xlt('Current') . ')';
+
+                        if ($USING_BOOTSTRAP) {
+                            echo " <div class='container-fluid lbfdata'>\n";
+                            if ($subtitle) {
+                                // There is a group subtitle so show it.
+                                $bs_cols = $CPR * intval(12 / $CPR);
+                                echo "<div class='row mb-2'>";
+                                echo "<div class='$BS_COL_CLASS-$bs_cols font-weight-bold text-primary'>" . text($subtitle) . "</div>";
+                                echo "</div>\n";
+                            }
+                        } else {
+                            echo " <table cellspacing='0' cellpadding='0' class='border-0 lbfdata'>\n";
+                            if ($subtitle) {
+                                // There is a group subtitle so show it.
+                                echo "<tr><td class='font-weight-bold border-top-0 text-primary' colspan='" . attr($CPR) . "'>" . text($subtitle) . "</td></tr>\n";
+                                echo "<tr><td class='font-weight-bold border-top-0' style='height:0.3125rem;' colspan='" . attr($CPR) . "'></td></tr>\n";
                             }
 
-                            echo "&nbsp;</td>\n";
-                            $hres = sqlStatement(
-                                "SELECT f.form_id, fe.date " .
-                                "FROM forms AS f, form_encounter AS fe WHERE " .
-                                "f.pid = ? AND f.formdir = ? AND " .
-                                "f.form_id != ? AND f.deleted = 0 AND " .
-                                "fe.pid = f.pid AND fe.encounter = f.encounter " .
-                                "ORDER BY fe.date DESC, f.encounter DESC, f.date DESC " .
-                                "LIMIT ?",
-                                array($pid, $formname, $formid, $formhistory)
-                            );
-                            // For some readings like vitals there may be multiple forms per encounter.
-                            // We sort these sensibly, however only the encounter date is shown here;
-                            // at some point we may wish to show also the data entry date/time.
-                            while ($hrow = sqlFetchArray($hres)) {
-                                echo "<td colspan='" . attr($CPR) . "' class='font-weight-bold border-top-0 text-right'>&nbsp;" .
-                                    text(oeFormatShortDate(substr($hrow['date'], 0, 10))) . "</td>\n";
-                                $historical_ids[$hrow['form_id']] = '';
-                            }
+                            // Initialize historical data array and write date headers.
+                            if ($formhistory > 0) {
+                                echo " <tr>";
+                                echo "<td colspan='" . attr($CPR) . "' class='font-weight-bold border-top-0 text-right'>";
+                                if (empty($is_lbf)) {
+                                    // Including actual date per IPPF request 2012-08-23.
+                                    echo text(oeFormatShortDate(substr($enrow['date'], 0, 10)));
+                                    echo ' (' . xlt('Current') . ')';
+                                }
 
-                            echo " </tr>";
+                                echo "&nbsp;</td>\n";
+                                $hres = sqlStatement(
+                                    "SELECT f.form_id, fe.date " .
+                                    "FROM forms AS f, form_encounter AS fe WHERE " .
+                                    "f.pid = ? AND f.formdir = ? AND " .
+                                    "f.form_id != ? AND f.deleted = 0 AND " .
+                                    "fe.pid = f.pid AND fe.encounter = f.encounter " .
+                                    "ORDER BY fe.date DESC, f.encounter DESC, f.date DESC " .
+                                    "LIMIT ?",
+                                    array($pid, $formname, $formid, $formhistory)
+                                );
+                                // For some readings like vitals there may be multiple forms per encounter.
+                                // We sort these sensibly, however only the encounter date is shown here;
+                                // at some point we may wish to show also the data entry date/time.
+                                while ($hrow = sqlFetchArray($hres)) {
+                                    echo "<td colspan='" . attr($CPR) . "' class='font-weight-bold border-top-0 text-right'>&nbsp;" .
+                                        text(oeFormatShortDate(substr($hrow['date'], 0, 10))) . "</td>\n";
+                                    $historical_ids[$hrow['form_id']] = '';
+                                }
+
+                                echo " </tr>";
+                            }
                         }
                     }
 
                     // Handle starting of a new row.
                     if (($titlecols > 0 && $cell_count >= $CPR) || $cell_count == 0 || $prepend_blank_row || $jump_new_row) {
                         end_row();
-                        if ($prepend_blank_row) {
-                            echo "<tr><td class='text border-top-0' colspan='" . attr($CPR) . "'>&nbsp;</td></tr>\n";
-                        }
-                        if (isOption($edit_options, 'RS')) {
-                            echo " <tr class='RS'>";
-                        } elseif (isOption($edit_options, 'RO')) {
-                            echo " <tr class='RO'>";
-                        } else {
-                            echo " <tr>";
-                        }
 
+                        if ($USING_BOOTSTRAP) {
+                            $tmp = 'form-row';
+                            if ($prepend_blank_row) {
+                                $tmp .= ' mt-3';
+                            }
+                            if (isOption($edit_options, 'RS')) {
+                                $tmp .= ' RS';
+                            } elseif (isOption($edit_options, 'RO')) {
+                                $tmp .= ' RO';
+                            }
+                            echo "<div class='$tmp'>";
+                        } else {
+                            if ($prepend_blank_row) {
+                                echo "<tr><td class='text border-top-0' colspan='" . attr($CPR) . "'>&nbsp;</td></tr>\n";
+                            }
+                            if (isOption($edit_options, 'RS')) {
+                                echo " <tr class='RS'>";
+                            } elseif (isOption($edit_options, 'RO')) {
+                                echo " <tr class='RO'>";
+                            } else {
+                                echo " <tr>";
+                            }
+                        }
                         // Clear historical data string.
                         foreach ($historical_ids as $key => $dummy) {
                             $historical_ids[$key] = '';
@@ -1179,46 +1235,47 @@ if (
                         $titlecols = 1;
                     }
 
-// First item is on the "left-border"
+                    // First item is on the "left-border"
                     $leftborder = true;
 
-// Handle starting of a new label cell.
+                    // Handle starting of a new label cell.
                     if ($titlecols > 0) {
                         end_cell();
+                        $tmp = ' text-wrap';
                         if (isOption($edit_options, 'SP')) {
                             $datacols = 0;
                             $titlecols = $CPR;
-                            echo "<td class='border-top-0 align-top' colspan='" . attr($titlecols) . "'";
-                        } else {
-                            // unsure why this was set to always text-nowrap. will monitor and perhaps this should be
-                            // an option in line options.
-                            echo "<td class='border-top-0 align-top text-wrap' colspan='" . attr($titlecols) . "'";
+                            $tmp = '';
                         }
-                        echo " class='";
-                        echo ($frow['uor'] == 2) ? "required" : "font-weight-bold";
+                        $tmp .= ($frow['uor'] == 2) ? ' required' : ' font-weight-bold';
                         if ($graphable) {
-                            echo " graph";
+                            $tmp .= ' graph';
                         }
+                        if ($USING_BOOTSTRAP) {
+                            $bs_cols = $titlecols * intval(12 / $CPR);
+                            echo "<div class='$BS_COL_CLASS-$bs_cols pt-1$tmp' ";
+                            // This ID is used by action conditions and also show_graph().
+                            echo "id='label_id_" . attr($field_id) . "'";
+                            echo ">";
+                        } else {
+                            echo "<td class='border-top-0 align-top$tmp' colspan='" . attr($titlecols) . "'";
+                            if ($cell_count > 0) {
+                                echo " style='padding-left: 0.8125rem'";
+                            }
+                            // This ID is used by action conditions and also show_graph().
+                            echo " id='label_id_" . attr($field_id) . "'";
+                            echo ">";
 
-                        echo "'";
-
-                        if ($cell_count > 0) {
-                            echo " style='padding-left: 0.8125rem'";
+                            foreach ($historical_ids as $key => $dummy) {
+                                $historical_ids[$key] .= "<td colspan='" . attr($titlecols) . "' class='text border-top-0 align-top text-nowrap'>";
+                            }
                         }
-                        // This ID is used by action conditions and also show_graph().
-                        echo " id='label_id_" . attr($field_id) . "'";
-                        echo ">";
-
-                        foreach ($historical_ids as $key => $dummy) {
-                            $historical_ids[$key] .= "<td colspan='" . attr($titlecols) . "' class='text border-top-0 align-top text-nowrap'>";
-                        }
-
                         $cell_count += $titlecols;
                     }
 
                     ++$item_count;
 
-                    echo "<strong>";
+                    // This gets a font-weight-bold class so removed strong
                     if ($frow['title']) {
                         $tmp = xl_layout_label($frow['title']);
                         echo text($tmp);
@@ -1229,48 +1286,50 @@ if (
                     } else {
                         echo "&nbsp;";
                     }
-                    echo "</strong>";
 
-// Note the labels are not repeated in the history columns.
+                    // Note the labels are not repeated in the history columns.
 
-// Handle starting of a new data cell.
+                    // Handle starting of a new data cell.
                     if ($datacols > 0) {
                         end_cell();
+                        $tmp = ' text';
                         if (isOption($edit_options, 'DS')) {
-                            echo "<td colspan='" . attr($datacols) . "' class='border-top-0 align-top text RS'";
+                            $tmp .= ' RS';
+                        } else if (isOption($edit_options, 'DO')) {
+                            $tmp .= ' RO';
                         }
-                        if (isOption($edit_options, 'DO')) {
-                            echo "<td colspan='" . attr($datacols) . "' class='border-top-0 align-top text RO'";
+                        if ($USING_BOOTSTRAP) {
+                            $bs_cols = $datacols * intval(12 / $CPR);
+                            echo "<div class='$BS_COL_CLASS-$bs_cols pt-1$tmp' ";
+                            // This ID is used by action conditions and also show_graph().
+                            echo "id='value_id_" . attr($field_id) . "'";
+                            echo ">";
                         } else {
-                            echo "<td colspan='" . attr($datacols) . "' class='border-top-0 align-top text'";
+                            echo "<td colspan='" . attr($datacols) . "' class='border-top-0 align-top$tmp'";
+                            echo " id='value_id_" . attr($field_id) . "'";
+                            if ($cell_count > 0) {
+                                echo " style='padding-left: 0.4375rem'";
+                            }
+                            echo ">";
+                            foreach ($historical_ids as $key => $dummy) {
+                                $historical_ids[$key] .= "<td colspan='" . attr($datacols) . "' class='text border-top-0 align-top text-right'>";
+                            }
                         }
-                        // This ID is used by action conditions.
-                        echo " id='value_id_" . attr($field_id) . "'";
-                        if ($cell_count > 0) {
-                            echo " style='padding-left: 0.4375rem'";
-                        }
-
-                        echo ">";
-
-                        foreach ($historical_ids as $key => $dummy) {
-                            $historical_ids[$key] .= "<td colspan='" . attr($datacols) . "' class='text border-top-0 align-top text-right'>";
-                        }
-
                         $cell_count += $datacols;
                     }
-
                     ++$item_count;
 
-// Skip current-value fields for the display-only case.
+                    // Skip current-value fields for the display-only case.
                     if (!$from_trend_form) {
                         if ($frow['edit_options'] == 'H') {
                             echo generate_display_field($frow, $currvalue);
                         } else {
+                            $frow['smallform'] = ' form-control-sm mw-100';
                             generate_form_field($frow, $currvalue);
                         }
                     }
 
-// Append to historical data of other dates for this item.
+                    // Append to historical data of other dates for this item.
                     foreach ($historical_ids as $key => $dummy) {
                         $value = lbf_current_value($frow, $key, 0);
                         $historical_ids[$key] .= generate_display_field($frow, $value);
@@ -1280,7 +1339,7 @@ if (
                 // Close all open groups.
                 if ($group_table_active) {
                     end_row();
-                    echo " </table>\n";
+                    echo $USING_BOOTSTRAP ? " </div>\n" : " </table>\n";
                     $group_table_active = false;
                 }
                 while (strlen($group_levels)) {
@@ -1384,7 +1443,7 @@ if (
                     echo "<select class='form-control' name='form_fs_provid'>";
                     echo FeeSheetHtml::genProviderOptionList(
                         ' ',
-                        tmp_provider_id
+                        $tmp_provider_id
                     );
                     echo "</select>\n";
                     echo "\n";

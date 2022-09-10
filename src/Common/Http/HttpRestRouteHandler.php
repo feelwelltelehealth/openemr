@@ -20,7 +20,6 @@ use Psr\Http\Message\ResponseInterface;
 
 class HttpRestRouteHandler
 {
-
     public static function dispatch(&$routes, HttpRestRequest $restRequest, $return_method = 'standard')
     {
         $dispatchRestRequest = clone $restRequest; // don't want to mess with the original request properties.
@@ -31,8 +30,23 @@ class HttpRestRouteHandler
                 , 'user' => $restRequest->getRequestUserUUID(), 'role' => $restRequest->getRequestUserRole()
                 , 'client' => $restRequest->getClientId(), 'apiType' => $restRequest->getApiType()
                 , 'route' => $restRequest->getRequestPath()
+                , 'queryParams' => $restRequest->getQueryParams()
             ]
         );
+
+        if ($dispatchRestRequest->isFhir() && self::isFhirSearchRequest($dispatchRestRequest)) {
+            (new SystemLogger())->debug("HttpRestRouteHandler::dispatch() FHIR POST _search request needs normalization");
+            $dispatchRestRequest = self::normalizeFhirSearchRequest($dispatchRestRequest);
+            (new SystemLogger())->debug(
+                "HttpRestRouteHandler::dispatch() request normalized",
+                ['resource' => $dispatchRestRequest->getResource(), 'method' => $dispatchRestRequest->getRequestMethod()
+                    , 'user' => $dispatchRestRequest->getRequestUserUUID(), 'role' => $dispatchRestRequest->getRequestUserRole()
+                    , 'client' => $dispatchRestRequest->getClientId(), 'apiType' => $dispatchRestRequest->getApiType()
+                    , 'route' => $dispatchRestRequest->getRequestPath()
+                    , 'queryParams' => $dispatchRestRequest->getQueryParams()
+                ]
+            );
+        }
 
         $route = $dispatchRestRequest->getRequestPath();
         $request_method = $dispatchRestRequest->getRequestMethod();
@@ -58,6 +72,13 @@ class HttpRestRouteHandler
                         $dispatchRestRequest->setOperation($parsedRoute->getOperation());
                     }
 
+
+                    // if our requested resource is a patient context ie patient/<resource>.<permission> then
+                    // we want to mark the request as a patient request and make sure we restrict requests
+                    if ($dispatchRestRequest->getScopeContextForResource($parsedRoute->getResource()) == 'patient') {
+                        $dispatchRestRequest->setPatientRequest(true);
+                    }
+
                     // make sure our scopes pass the security checks
                     self::checkSecurity($dispatchRestRequest);
                     (new SystemLogger())->debug("HttpRestRouteHandler->dispatch() dispatching route", ["route" => $routePath,]);
@@ -75,11 +96,16 @@ class HttpRestRouteHandler
                     }
                     if ($return_method === 'standard') {
                         header('Content-Type: application/json');
-                        echo json_encode($result);
+                        // if we fail to encode we WANT an error thrown
+                        // PHP default json_encode will escape forward slash characters '/' so you can embed the JSON
+                        // inside of a <script> tag.  However, since forward slash escaping is optional as part of the
+                        // JSON spec some servers (looking at you ONC FHIR Inferno and your missing data tests) don't
+                        // know how to handle the unescaped slashes so we remove the forward slash escaping.
+                        echo json_encode($result, JSON_THROW_ON_ERROR | JSON_UNESCAPED_SLASHES);
                         break;
                     }
                     if ($return_method === 'direct-json') {
-                        return json_encode($result);
+                        return json_encode($result, JSON_THROW_ON_ERROR);
                     }
 
                     // $return_method == 'direct'
@@ -95,9 +121,35 @@ class HttpRestRouteHandler
                     , 'clientId' => $restRequest->getClientId()
                     , 'userUUID' => $restRequest->getRequestUserUUIDString()
                     , 'userType' => $restRequest->getRequestUserRole()
+                    , 'path' => $restRequest->getRequestURI()
                 ]
             );
             http_response_code(401);
+            exit;
+        } catch (\JsonException $exception) { // intellisense says this is never thrown but the json_encode WILL throw this
+            (new SystemLogger())->error(
+                "HttpRestRouteHandler::dispatch() failed to encode JSON object" . $exception->getMessage(),
+                [
+                    'clientId' => $restRequest->getClientId()
+                    , 'userUUID' => $restRequest->getRequestUserUUIDString()
+                    , 'userType' => $restRequest->getRequestUserRole()
+                    , 'path' => $restRequest->getRequestURI()
+                ]
+            );
+            http_response_code(500);
+            exit;
+        } catch (Exception $exception) {
+            (new SystemLogger())->error(
+                "HttpRestRouteHandler::dispatch() " . $exception->getMessage(),
+                [
+                    'section' => $exception->getRequiredSection(), 'subCategory' => $exception->getRequiredSection()
+                    , 'clientId' => $restRequest->getClientId()
+                    , 'userUUID' => $restRequest->getRequestUserUUIDString()
+                    , 'userType' => $restRequest->getRequestUserRole()
+                    , 'path' => $restRequest->getRequestURI()
+                ]
+            );
+            http_response_code(500);
             exit;
         }
     }
@@ -115,6 +167,47 @@ class HttpRestRouteHandler
             }
         }
         echo $response->getBody()->getContents();
+    }
+
+    private static function isFhirSearchRequest(HttpRestRequest $dispatchRestRequest): bool
+    {
+        return $dispatchRestRequest->isFhirSearchRequest();
+    }
+
+    private static function normalizeFhirSearchRequest(HttpRestRequest $dispatchRestRequest): HttpRestRequest
+    {
+
+        // in FHIR a POST request to a resource/_search is identical to the equivalent GET request with parameters.
+        // POST requests are application/x-www-form-urlencoded and parameters may appear both in the URL and the request
+        // body. The spec says that putting requests into both the body and query string is the same as repeating the
+        // parameter.  In our case we treat the parameter as a union search if it appears in both the query string and
+        // the post body.
+        $normalizedRequest = clone $dispatchRestRequest;
+        // chop off the back
+        $pos = strripos($dispatchRestRequest->getRequestPath(), "/_search");
+        if ($pos === false) {
+            throw new \BadMethodCallException("Attempted to normalize search request on a path that does not contain search");
+        }
+
+        $requestPath = substr($dispatchRestRequest->getRequestPath(), 0, $pos);
+        $normalizedRequest->setRequestPath($requestPath);
+        $queryVars = $normalizedRequest->getQueryParams();
+        $normalizedRequest->setRequestMethod("GET");
+
+        // grab any post vars and stuff them into our query vars
+        // @see https://www.hl7.org/fhir/http.html#search
+        if (!empty($_POST)) {
+            foreach ($_POST as $key => $value) {
+                if (isset($queryVars[$key])) {
+                    $queryVars[$key] = is_array($queryVars[$key]) ? $queryVars[$key] : [$queryVars[$key]];
+                    $queryVars[$key][] = $value;
+                } else {
+                    $queryVars[$key] = $value;
+                }
+            }
+        }
+        $normalizedRequest->setQueryParams($queryVars);
+        return $normalizedRequest;
     }
 
     /**
@@ -152,13 +245,15 @@ class HttpRestRouteHandler
 
         if ($restRequest->isPatientRequest()) {
             (new SystemLogger())->debug("checkSecurity() - patient specific request, so only allowing access to records to that one patient");
-            if (empty($restRequest->getPatientUUIDString()) || ($restRequest->getRequestUserRole() !== 'patient') || ($scopeType !== 'patient')) {
+            if (empty($restRequest->getPatientUUIDString())) { // we MUST have a patient uuid string if its a patient request
                 // need to fail here since this means the downstream patient binding mechanism will be broken
                 (new SystemLogger())->error("checkSecurity() - exited since patient binding mechanism broken");
                 http_response_code(401);
                 $config::destroySession();
                 exit;
             }
+            // if we are a patient only request and we have a patient uuid populated (from session) then we set our scope type to be patient.
+            $scopeType = 'patient';
         }
 
         if ($restRequest->isFhir()) {
@@ -169,7 +264,9 @@ class HttpRestRouteHandler
             ) {
                 return;
             }
-            if ($restRequest->isPatientWriteRequest()) {
+            // we do NOT want logged in patients writing data at this point so we fail
+            // TODO: when we have better auditing and provider merge/verification mechanisms look at opening up patient write access to data.
+            if ($restRequest->isPatientWriteRequest() && $restRequest->getRequestUserRole() == 'patient') {
                 // not allowing patient userrole write for fhir
                 (new SystemLogger())->debug("checkSecurity() - not allowing patient role write for fhir");
                 http_response_code(401);

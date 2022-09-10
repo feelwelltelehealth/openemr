@@ -13,12 +13,11 @@
 namespace OpenEMR\FHIR\SMART;
 
 use OpenEMR\Common\Auth\OpenIDConnect\Repositories\ClientRepository;
-use OpenEMR\Common\Logging\SystemLogger;
 use OpenEMR\Common\Uuid\UuidRegistry;
 use OpenEMR\Events\PatientDemographics\RenderEvent;
-use OpenEMR\RestControllers\AuthorizationController;
 use OpenEMR\Services\PatientService;
 use Symfony\Component\EventDispatcher\EventDispatcher;
+use OpenEMR\FHIR\Config\ServerConfig;
 
 // not sure I really like this here... it seems like some of this
 // should be encapsulated in a class that autoloading can reach.
@@ -63,7 +62,7 @@ class SmartLaunchController
         $pid = $event->getPid();
         $patientService = new PatientService();
         // make sure we've created all of our missing UUIDs
-        (new UuidRegistry(['table_name' => 'patient_data']))->createMissingUuids();
+        UuidRegistry::createMissingUuidsForTables(['patient_data']);
         // going to work with string uuids
         $puuid = UuidRegistry::uuidToString($patientService->getUuid($pid));
         ?>
@@ -85,8 +84,9 @@ class SmartLaunchController
             // here...  all the SMART apps we've seen appear to follow a 'launch.html' nomenclature but that doesn't
             // appear to be required in the spec.
 
-            $issuer = $GLOBALS['site_addr_oath'] . $GLOBALS['web_root'] . '/apis/' . $_SESSION['site_id'] . "/fhir";
-            $launchParams = "?launch=" . urlencode($launchCode) . "&iss=" . urlencode($issuer);
+            $issuer = (new ServerConfig())->getFhirUrl();
+            // issuer and audience are the same in a EHR SMART Launch
+            $launchParams = "?launch=" . urlencode($launchCode) . "&iss=" . urlencode($issuer) . "&aud=" . urlencode($issuer);
 
             expand_collapse_widget(
                 $widgetTitle,
@@ -159,15 +159,6 @@ class SmartLaunchController
             // work...
             if ($client->isEnabled() && $client->hasScope(self::CLIENT_APP_REQUIRED_LAUNCH_SCOPE)) {
                 $smartList[] = $client;
-            } else {
-                (new SystemLogger())->debug(
-                    "Skipping over client ",
-                    [
-                        "clientId" => $client->getIdentifier()
-                        , "enabled" => $client->isEnabled()
-                        , "hasLaunchScope" => $client->hasScope(self::CLIENT_APP_REQUIRED_LAUNCH_SCOPE)
-                    ]
-                );
             }
         }
         return $smartList;

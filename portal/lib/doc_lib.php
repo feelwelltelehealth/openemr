@@ -7,23 +7,37 @@
  * @link      https://www.open-emr.org
  * @author    Jerry Padgett <sjpadgett@gmail.com>
  * @author    Brady Miller <brady.g.miller@gmail.com>
- * @copyright Copyright (c) 2016-2019 Jerry Padgett <sjpadgett@gmail.com>
+ * @copyright Copyright (c) 2016-2021 Jerry Padgett <sjpadgett@gmail.com>
  * @copyright Copyright (c) 2019 Brady Miller <brady.g.miller@gmail.com>
  * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
  */
 
 // Will start the (patient) portal OpenEMR session/cookie.
-require_once(dirname(__FILE__) . "/../../src/Common/Session/SessionUtil.php");
+require_once(__DIR__ . "/../../src/Common/Session/SessionUtil.php");
 OpenEMR\Common\Session\SessionUtil::portalSessionStart();
 
 if (isset($_SESSION['pid']) && isset($_SESSION['patient_portal_onsite_two'])) {
+    // ensure patient is bootstrapped (if sent)
+    if (!empty($_POST['cpid'])) {
+        if ($_POST['cpid'] != $_SESSION['pid']) {
+            echo "illegal Action";
+            OpenEMR\Common\Session\SessionUtil::portalSessionCookieDestroy();
+            exit;
+        }
+    }
     $pid = $_SESSION['pid'];
     $ignoreAuth_onsite_portal = true;
-    require_once(dirname(__FILE__) . "/../../interface/globals.php");
+    require_once(__DIR__ . "/../../interface/globals.php");
+    // only support download handler from patient portal
+    if ($_POST['handler'] != 'download') {
+        echo xlt("Not authorized");
+        OpenEMR\Common\Session\SessionUtil::portalSessionCookieDestroy();
+        exit;
+    }
 } else {
     OpenEMR\Common\Session\SessionUtil::portalSessionCookieDestroy();
     $ignoreAuth = false;
-    require_once(dirname(__FILE__) . "/../../interface/globals.php");
+    require_once(__DIR__ . "/../../interface/globals.php");
     if (!isset($_SESSION['authUserID'])) {
         $landingpage = "index.php";
         header('Location: ' . $landingpage);
@@ -33,25 +47,32 @@ if (isset($_SESSION['pid']) && isset($_SESSION['patient_portal_onsite_two'])) {
 
 require_once("$srcdir/classes/Document.class.php");
 require_once("$srcdir/classes/Note.class.php");
-require_once(dirname(__FILE__) . "/appsql.class.php");
+require_once(__DIR__ . "/appsql.class.php");
 
 use Mpdf\Mpdf;
+use OpenEMR\Common\Csrf\CsrfUtils;
+
+if (!(isset($GLOBALS['portal_onsite_two_enable'])) || !($GLOBALS['portal_onsite_two_enable'])) {
+    echo xlt('Patient Portal is turned off');
+    exit;
+}
+// confirm csrf (from both portal and core)
+if (!CsrfUtils::verifyCsrfToken($_POST["csrf_token_form"], 'doc-lib')) {
+    CsrfUtils::csrfNotVerified();
+}
 
 $logit = new ApplicationTable();
 $htmlin = $_POST['content'];
 $dispose = $_POST['handler'];
-$cpid = $_POST['cpid'] ? $_POST['cpid'] : $GLOBALS['pid'];
-$category = isset($_POST['catid']) ? $_POST['catid'] : 0;
+$cpid = $_POST['cpid'] ?: $GLOBALS['pid'];
+$category = $_POST['catid'] ?? 0;
 
 try {
     if (!$category) {
         $result = sqlQuery("SELECT id FROM categories WHERE name LIKE ?", array("Reviewed"));
-        $category = $result['id'] ? $result['id'] : 3;
+        $category = $result['id'] ?: 3;
     }
     $form_filename = convert_safe_file_dir_name($_REQUEST['docid']) . '_' . convert_safe_file_dir_name($cpid) . '.pdf';
-    $templatedir = $GLOBALS['OE_SITE_DIR'] . "/documents/onsite_portal_documents/patient_documents";
-    $templatepath = "$templatedir/$form_filename";
-    $htmlout = '';
     $config_mpdf = array(
         'tempDir' => $GLOBALS['MPDF_WRITE_DIR'],
         'mode' => $GLOBALS['pdf_language'],
@@ -70,11 +91,38 @@ try {
         'autoScriptToLang' => true,
         'keep_table_proportions' => true
     );
+    $len = stripos($htmlin, 'data:application/pdf;base64,');
+    if ($len !== false) {
+        if ($dispose == "download") {
+            //'<object data=data:application/pdf;base64,'
+            $len = strpos($htmlin, ',');
+            $content = substr($htmlin, $len + 1);
+            $content = str_replace("type='application/pdf' width='100%' height='450'></object>", '', $content);
+
+            $pdf = base64_decode($content);
+            header('Content-Description: File Transfer');
+            header('Content-Type: application/pdf');
+            header('Content-Disposition: attachment; filename=' . $form_filename);
+            header('Content-Transfer-Encoding: binary');
+            header('Expires: 0');
+            header('Cache-Control: must-revalidate');
+            header('Pragma: public');
+            header('Content-Length: ' . strlen($pdf));
+            ob_clean();
+            flush();
+            echo $pdf;
+            flush();
+            exit();
+        }
+    }
+
     $pdf = new mPDF($config_mpdf);
     if ($_SESSION['language_direction'] == 'rtl') {
         $pdf->SetDirectionality('rtl');
     }
 
+    // purify html
+    $htmlin = (new \HTMLPurifier(\HTMLPurifier_Config::createDefault()))->purify($htmlin);
     $htmlin = "<html><body>$htmlin</body></html>";
     // need custom stylesheet for templates
     $pdf->writeHtml($htmlin);
@@ -84,12 +132,6 @@ try {
         header("Content-Disposition: attachment; filename=$form_filename");
         $pdf->Output($form_filename, 'D');
         $logit->portalLog('download document', $cpid, ('document:' . $form_filename));
-        exit();
-    }
-
-    if ($dispose == 'view') {
-        Header("Content-type: application/pdf");
-        $pdf->Output($templatepath, 'I');
         exit();
     }
 
@@ -105,5 +147,5 @@ try {
         exit();
     };
 } catch (Exception $e) {
-    die($e->getMessage());
+    die(text($e->getMessage()));
 }

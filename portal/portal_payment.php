@@ -16,7 +16,7 @@
  */
 
 // Will start the (patient) portal OpenEMR session/cookie.
-require_once(dirname(__FILE__) . "/../src/Common/Session/SessionUtil.php");
+require_once(__DIR__ . "/../src/Common/Session/SessionUtil.php");
 OpenEMR\Common\Session\SessionUtil::portalSessionStart();
 
 $isPortal = false;
@@ -24,11 +24,11 @@ if (isset($_SESSION['pid']) && isset($_SESSION['patient_portal_onsite_two'])) {
     $pid = $_SESSION['pid'];
     $ignoreAuth_onsite_portal = true;
     $isPortal = true;
-    require_once(dirname(__FILE__) . "/../interface/globals.php");
+    require_once(__DIR__ . "/../interface/globals.php");
 } else {
     OpenEMR\Common\Session\SessionUtil::portalSessionCookieDestroy();
     $ignoreAuth = false;
-    require_once(dirname(__FILE__) . "/../interface/globals.php");
+    require_once(__DIR__ . "/../interface/globals.php");
     if (!isset($_SESSION['authUserID'])) {
         $landingpage = "index.php";
         header('Location: ' . $landingpage);
@@ -36,7 +36,7 @@ if (isset($_SESSION['pid']) && isset($_SESSION['patient_portal_onsite_two'])) {
     }
 }
 
-require_once(dirname(__FILE__) . "/lib/appsql.class.php");
+require_once(__DIR__ . "/lib/appsql.class.php");
 require_once("$srcdir/patient.inc");
 require_once("$srcdir/payment.inc.php");
 require_once("$srcdir/forms.inc");
@@ -46,6 +46,8 @@ require_once("$srcdir/encounter_events.inc.php");
 
 use OpenEMR\Billing\BillingUtilities;
 use OpenEMR\Common\Crypto\CryptoGen;
+use OpenEMR\Common\Csrf\CsrfUtils;
+use OpenEMR\PaymentProcessing\Sphere\SpherePayment;
 
 $cryptoGen = new CryptoGen();
 
@@ -125,13 +127,13 @@ function echoLine($iname, $date, $charges, $ptpaid, $inspaid, $duept, $encounter
         "' " . " value='" . '' . "' onchange='coloring();calctotal()'  autocomplete='off' " . "onkeyup='calctotal()'/></td>\n";
     echo " </tr>\n";
 
-    $sum_charges += $charges * 1;
-    $sum_ptpaid += $ptpaid * -1;
-    $sum_inspaid += $inspaid * -1;
-    $sum_duept += $duept * 1;
-    $sum_patcopay += $patcopay * 1;
-    $sum_copay += $copay * 1;
-    $sum_balance += $balance * 1;
+    $sum_charges += (float)$charges * 1;
+    $sum_ptpaid += (float)$ptpaid * -1;
+    $sum_inspaid += (float)$inspaid * -1;
+    $sum_duept += (float)$duept * 1;
+    $sum_patcopay += (float)$patcopay * 1;
+    $sum_copay += (float)$copay * 1;
+    $sum_balance += (float)$balance * 1;
 }
 
 // We use this to put dashes, colons, etc. back into a timestamp.
@@ -227,7 +229,7 @@ if ($_POST['form_save']) {
 
     if ($_POST['form_upay'] && $_REQUEST['radio_type_of_payment'] != 'pre_payment') {
         foreach ($_POST['form_upay'] as $enc => $payment) {
-            if ($amount = 0 + $payment) {
+            if ($amount = (float)$payment) {
                 $zero_enc = $enc;
 
                 //----------------------------------------------------------------------------------------------------
@@ -456,8 +458,8 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
                 url: formURL,
                 type: "POST",
                 data: {
+                    'csrf_token_form': <?php echo js_escape(CsrfUtils::collectCsrfToken('messages-portal')); ?>,
                     'task': 'add',
-                    'owner': owner,
                     'pid': pid,
                     'inputBody': note,
                     'title': 'Bill/Collect',
@@ -1053,7 +1055,7 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
         <table width="20%" border="0" cellspacing="0" cellpadding="0" id="table_display_prepayment" style="margin-bottom: 10px; display: none">
             <tr>
                 <td class='detail'><?php echo xlt('Pre Payment'); ?></td>
-                <td><input class="form-control" type='text' name='form_prepayment' style=''/></td>
+                <td><input class="form-control" type='text' id= 'form_prepayment' name='form_prepayment' style=''/></td>
             </tr>
         </table>
         <table id="table_display" style="background: #eee;" class="table table-sm table-striped table-bordered w-100">
@@ -1109,7 +1111,7 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
             $bres = sqlStatement($query, array($pid, $pid));
             //
             while ($brow = sqlFetchArray($bres)) {
-                $key = 0 + $brow['encounter'];
+                $key = (int)$brow['encounter'];
                 if (empty($encs[$key])) {
                     $encs[$key] = array('encounter' => $brow['encounter'], 'date' => $brow['encdate'], 'last_level_closed' => $brow['last_level_closed'], 'charges' => 0, 'payments' => 0, 'reason' => $brow['reason']
                     );
@@ -1148,7 +1150,7 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
             $dres = sqlStatement($query, array($pid, $pid));
             //
             while ($drow = sqlFetchArray($dres)) {
-                $key = 0 + $drow['encounter'];
+                $key = (int)$drow['encounter'];
                 if (empty($encs[$key])) {
                     $encs[$key] = array(
                         'encounter' => $drow['encounter'], 'date' => $drow['encdate'],
@@ -1283,7 +1285,11 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
         <?php
         if (!isset($_SESSION['authUserID'])) {
             if (!isset($ccdata["cardHolderName"])) {
-                echo '<button type="button" class="btn btn-primary" data-toggle="modal" data-target="#openPayModal">' . xlt("Pay Invoice") . '</button>';
+                if ($GLOBALS['payment_gateway'] == 'Sphere') {
+                    echo SpherePayment::renderSphereHtml('patient');
+                } else {
+                    echo '<button type="button" class="btn btn-primary" data-toggle="modal" data-target="#openPayModal">' . xlt("Pay Invoice") . '</button>';
+                }
             } else {
                 echo '<h4><span class="bg-danger">' . xlt("Locked Payment Pending") . '</span></h4>';
             }
@@ -1311,7 +1317,7 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
                     <!--<button type="button" class="close" data-dismiss="modal">&times;</button>-->
                 </div>
                 <div class="modal-body">
-                    <?php if ($GLOBALS['payment_gateway'] != 'Stripe') { ?>
+                    <?php if ($GLOBALS['payment_gateway'] != 'Stripe' && $GLOBALS['payment_gateway'] != 'Sphere') { ?>
                     <form id='paymentForm' method='post' action='<?php echo $GLOBALS["webroot"] ?>/portal/lib/paylib.php'>
                         <fieldset>
                             <div class="form-group">
@@ -1409,9 +1415,9 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
                                         <input name="cardHolderName" id="cardHolderName" type="text" class="form-control" pattern="\w+ \w+.*" title="<?php echo xla('Fill your first and last name'); ?>" value="<?php echo attr($patdata['fname']) . ' ' . attr($patdata['lname']) ?>" />
                                     </div>
                                 </div>
-                                <div class="form-row form-group">
+                                <div class="form-group">
                                     <label for="card-element"><?php echo xlt('Credit or Debit Card') ?></label>
-                                    <div id="card-element"></div>
+                                    <div class="form-group" id="card-element"></div>
                                     <div id="card-errors" role="alert"></div>
                                 </div>
                                 <div class="col-md-6">
@@ -1449,7 +1455,7 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
         var ccerr = <?php echo xlj('Invalid Credit Card Number'); ?>
 
         // In House CC number Validation
-        $('#cardNumber').validateCreditCard(function (result) {
+        /*$('#cardNumber').validateCreditCard(function (result) {
             var r = (result.card_type === null ? '' : result.card_type.name.toUpperCase())
             var v = (result.valid === true ? ' Valid Number' : ' Validating')
             if (result.valid === true) {
@@ -1458,7 +1464,7 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
                 document.getElementById("cardtype").style.color = "#aa0000";
             }
             $('#cardtype').text(r + v);
-        });
+        });*/
 
         // In House CC Validation
         function validateCC() {
@@ -1482,7 +1488,7 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
         }
     </script>
 
-    <?php if ($GLOBALS['payment_gateway'] == 'AuthorizeNet') {
+    <?php if ($GLOBALS['payment_gateway'] == 'AuthorizeNet' && isset($_SESSION['patient_portal_onsite_two'])) {
         // Include Authorize.Net dependency to tokenize card.
         // Will return a token to use for payment request keeping
         // credit info off the server.
@@ -1562,19 +1568,18 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
         </script>
     <?php }  // end authorize.net ?>
 
-    <?php if ($GLOBALS['payment_gateway'] == 'Stripe') { // Begin Include Stripe ?>
+    <?php if ($GLOBALS['payment_gateway'] == 'Stripe' && isset($_SESSION['patient_portal_onsite_two'])) { // Begin Include Stripe ?>
         <script>
             const stripe = Stripe(publicKey);
             const elements = stripe.elements();// Custom styling can be passed to options when creating an Element.
             const style = {
                 base: {
                     color: '#32325d',
-                    lineHeight: '18px',
-                    fontFamily: '"Helvetica Neue", "Helvetica", sans-serif',
+                    lineHeight: '1.2rem',
                     fontSmoothing: 'antialiased',
                     fontSize: '16px',
                     '::placeholder': {
-                        color: '#aaa8a8'
+                        color: '#8e8e8e'
                     }
                 },
                 invalid: {
@@ -1648,6 +1653,12 @@ if ($_POST['form_save'] || $_REQUEST['receipt']) {
             }
         </script>
     <?php } ?>
+
+    <?php
+    if ($GLOBALS['payment_gateway'] == 'Sphere' && isset($_SESSION['patient_portal_onsite_two'])) {
+        echo (new SpherePayment('patient', $pid))->renderSphereJs();
+    }
+    ?>
 
     </body>
     <?php } // end else display ?>

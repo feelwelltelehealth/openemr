@@ -18,7 +18,6 @@ require_once(dirname(__FILE__) . "/api.inc");
 
 class FeeSheetHtml extends FeeSheet
 {
-
   // Dynamically generated JavaScript to maintain justification codes.
     public $justinit = "var f = document.forms[0];\n";
 
@@ -32,7 +31,7 @@ class FeeSheetHtml extends FeeSheet
   // field, so that we can define providers (for billing purposes)
   // who do not appear in the calendar.
   //
-    public static function genProviderOptionList($toptext, $default = 0)
+    public static function genProviderOptionList($toptext, $default = 0, $inactive = false)
     {
         $s = '';
         // Get user's default facility, or 0 if none.
@@ -41,8 +40,10 @@ class FeeSheetHtml extends FeeSheet
         //
         $sqlarr = array($def_facility);
         $query = "SELECT id, lname, fname, facility_id FROM users WHERE " .
-        "( authorized = 1 OR info LIKE '%provider%' ) AND username != '' " .
-        "AND active = 1 AND ( info IS NULL OR info NOT LIKE '%Inactive%' )";
+        "( authorized = 1 OR info LIKE '%provider%' ) AND username != '' ";
+        if (!$GLOBALS['include_inactive_providers']) {
+            $query .= " AND active = 1 AND ( info IS NULL OR info NOT LIKE '%Inactive%' )";
+        }
         // If restricting to providers matching user facility...
         if (!empty($GLOBALS['gbl_restrict_provider_facility'])) {
             $query .= " AND ( facility_id = 0 OR facility_id = ? )";

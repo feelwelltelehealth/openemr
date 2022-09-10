@@ -20,6 +20,7 @@ define("TRANSMIT_ERX", 4);
  */
 
 use OpenEMR\Common\ORDataObject\ORDataObject;
+use OpenEMR\Common\ORDataObject\Address;
 
 class Pharmacy extends ORDataObject
 {
@@ -161,7 +162,7 @@ class Pharmacy extends ORDataObject
 
         return "";
     }
-    function _set_number($num, $type)
+    function set_number($num, $type)
     {
         $found = false;
         for ($i = 0; $i < count($this->phone_numbers); $i++) {
@@ -183,11 +184,11 @@ class Pharmacy extends ORDataObject
 
     function set_phone($phone)
     {
-        $this->_set_number($phone, TYPE_WORK);
+        $this->set_number($phone, TYPE_WORK);
     }
     function set_fax($fax)
     {
-        $this->_set_number($fax, TYPE_FAX);
+        $this->set_number($fax, TYPE_FAX);
     }
 
     function get_fax()
@@ -299,7 +300,4 @@ class Pharmacy extends ORDataObject
     {
         return $this->pageno = 1;
     }
-} // end of Pharmacy
-/*$p = new Pharmacy("1");
-echo $p->toString(true);
-*/
+}

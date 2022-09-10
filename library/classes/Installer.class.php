@@ -125,6 +125,16 @@ class Installer
         return true;
     }
 
+    public function iuname_is_valid()
+    {
+        if ($this->iuname == "" || !isset($this->iuname)) {
+            $this->error_message = "Initial user last name is invalid: '$this->iuname'";
+            return false;
+        }
+
+        return true;
+    }
+
     public function password_is_valid()
     {
         if ($this->pass == "" || !isset($this->pass)) {
@@ -400,6 +410,40 @@ class Installer
         return true;
     }
 
+    public function on_care_coordination()
+    {
+        $resource = $this->execute_sql("SELECT `mod_id` FROM `modules` WHERE `mod_name` = 'Carecoordination' LIMIT 1");
+        $resource_array = mysqli_fetch_array($resource, MYSQLI_ASSOC);
+        $modId = $resource_array['mod_id'];
+        if (empty($modId)) {
+            $this->error_message = "ERROR configuring Care Coordination module. Unable to get mod_id for Carecoordination module\n";
+            return false;
+        }
+
+        $resource = $this->execute_sql("SELECT `section_id` FROM `module_acl_sections` WHERE `section_identifier` = 'carecoordination' LIMIT 1");
+        $resource_array = mysqli_fetch_array($resource, MYSQLI_ASSOC);
+        $sectionId = $resource_array['section_id'];
+        if (empty($sectionId)) {
+            $this->error_message = "ERROR configuring Care Coordination module. Unable to get section_id for carecoordination module section\n";
+            return false;
+        }
+
+        $resource = $this->execute_sql("SELECT `id` FROM `gacl_aro_groups` WHERE `value` = 'admin' LIMIT 1");
+        $resource_array = mysqli_fetch_array($resource, MYSQLI_ASSOC);
+        $groupId = $resource_array['id'];
+        if (empty($groupId)) {
+            $this->error_message = "ERROR configuring Care Coordination module. Unable to get id for gacl_aro_groups admin section\n";
+            return false;
+        }
+
+        if ($this->execute_sql("INSERT INTO `module_acl_group_settings` (`module_id`, `group_id`, `section_id`, `allowed`) VALUES ('" . $this->escapeSql($modId) . "', '" . $this->escapeSql($groupId) . "', '" . $this->escapeSql($sectionId) . "', 1)") == false) {
+            $this->error_message = "ERROR configuring Care Coordination module. Unable to add the module_acl_group_settings acl entry\n";
+            return false;
+        }
+
+        return true;
+    }
+
     /**
      * Generates the initial user's 2FA QR Code
      * @return bool|string|void
@@ -427,6 +471,10 @@ class Installer
             if (! $this->recurse_copy($source_directory, $destination_directory)) {
                 $this->error_message = "unable to copy directory: '$source_directory' to '$destination_directory'. " . $this->error_message;
                 return false;
+            }
+            // the new site will create it's own keys so okay to delete these copied from the source site
+            if (!$this->clone_database) {
+                array_map('unlink', glob($destination_directory . "/documents/logs_and_misc/methods/*"));
             }
         }
 
@@ -912,9 +960,9 @@ $config = 1; /////////////
         $gacl->add_acl(
             array(
                 'admin' => array('drugs'),
-                'encounters' => array('coding'),
+                'encounters' => array('auth', 'coding', 'notes'),
                 'patients' => array('appt'),
-                'groups' => array('gcalendar','glog')
+                'groups' => array('gcalendar', 'glog')
             ),
             null,
             array($clin),
@@ -931,7 +979,7 @@ $config = 1; /////////////
         //
         $gacl->add_acl(
             array(
-                'patients' => array('alert','pat_rep')
+                'patients' => array('alert')
             ),
             null,
             array($front),
@@ -973,7 +1021,7 @@ $config = 1; /////////////
         // xl('Things that front office can read and partly modify')
         $gacl->add_acl(
             array(
-                'patients' => array('appt', 'demo', 'trans', 'notes'),
+                'patients' => array('appt', 'demo'),
                 'groups' => array('gcalendar')
             ),
             null,
@@ -991,7 +1039,7 @@ $config = 1; /////////////
         //
         $gacl->add_acl(
             array(
-                'patients' => array('alert','pat_rep')
+                'patients' => array('alert')
             ),
             null,
             array($back),
@@ -1127,7 +1175,15 @@ $config = 1; /////////////
             $this->disconnect();
             // Using @ in below call to hide the php warning in cases where the
             //  below connection does not work, which is expected behavior.
-            if (! @$this->user_database_connection()) {
+            // Using try in below call to catch the mysqli exception when the
+            //  below connection does not work, which is expected behavior (needed to
+            //  add this try/catch clause for PHP 8.1).
+            try {
+                $checkUserDatabaseConnection = @$this->user_database_connection();
+            } catch (Exception $e) {
+                $checkUserDatabaseConnection = false;
+            }
+            if (! $checkUserDatabaseConnection) {
                 // Re-connect to mysql via root user
                 if (! $this->root_database_connection()) {
                     return false;
@@ -1190,6 +1246,10 @@ $config = 1; /////////////
             if (! $this->install_additional_users()) {
                 return false;
             }
+
+            if (! $this->on_care_coordination()) {
+                return false;
+            }
         }
 
         return true;
@@ -1241,10 +1301,10 @@ $config = 1; /////////////
     private function connect_to_database($server, $user, $password, $port, $dbname = '')
     {
         $pathToCerts = __DIR__ . "/../../sites/" . $this->site . "/documents/certificates/";
-        $clientFlag = null;
+        $mysqlSsl = false;
         $mysqli = mysqli_init();
         if (defined('MYSQLI_CLIENT_SSL') && file_exists($pathToCerts . "mysql-ca")) {
-            $clientFlag = MYSQLI_CLIENT_SSL;
+            $mysqlSsl = true;
             if (
                 file_exists($pathToCerts . "mysql-key") &&
                 file_exists($pathToCerts . "mysql-cert")
@@ -1270,7 +1330,12 @@ $config = 1; /////////////
                 );
             }
         }
-        if (! mysqli_real_connect($mysqli, $server, $user, $password, $dbname, (int)$port != 0 ? (int)$port : 3306, '', $clientFlag)) {
+        if ($mysqlSsl) {
+            $ok = mysqli_real_connect($mysqli, $server, $user, $password, $dbname, (int)$port != 0 ? (int)$port : 3306, '', MYSQLI_CLIENT_SSL);
+        } else {
+            $ok = mysqli_real_connect($mysqli, $server, $user, $password, $dbname, (int)$port != 0 ? (int)$port : 3306);
+        }
+        if (!$ok) {
             $this->error_message = 'unable to connect to sql server because of: (' . mysqli_connect_errno() . ') ' . mysqli_connect_error();
             return false;
         }
@@ -1380,10 +1445,11 @@ $config = 1; /////////////
         $cmd = "mysqldump -u " . escapeshellarg($login) .
         " -h " . $host .
         " -p" . escapeshellarg($pass) .
-        " --opt --skip-extended-insert --quote-names -r $backup_file " .
+        " --ignore-table=" . escapeshellarg($dbase . ".onsite_activity_view") . " --hex-blob --opt --skip-extended-insert --quote-names -r $backup_file " .
         escapeshellarg($dbase);
 
-        $tmp0 = exec($cmd, $tmp1 = array(), $tmp2);
+        $tmp1 = [];
+        $tmp0 = exec($cmd, $tmp1, $tmp2);
         if ($tmp2) {
             die("Error $tmp2 running \"$cmd\": $tmp0 " . implode(' ', $tmp1));
         }
@@ -1409,12 +1475,16 @@ $config = 1; /////////////
     {
         $current_theme =  $this->execute_sql("SELECT gl_value FROM globals WHERE gl_name LIKE '%css_header%'");
         $current_theme = mysqli_fetch_array($current_theme);
-        return $current_theme [0];
+        return $current_theme[0];
     }
 
     public function setCurrentTheme()
     {
-        $this->getCurrentTheme();//why is this needed ?
+        $current_theme = $this->getCurrentTheme();
+        // for cloned sites since they're not asked about a new theme
+        if (!$this->new_theme) {
+            $this->new_theme = $current_theme;
+        }
         return $this->execute_sql("UPDATE globals SET gl_value='" . $this->escapeSql($this->new_theme) . "' WHERE gl_name LIKE '%css_header%'");
     }
 
@@ -1451,12 +1521,10 @@ $config = 1; /////////////
             $theme_file_path = $img_path . $theme_file_name;
             $div_start = "                      <div class='row'>";
             $div_end = "                      </div>";
-            $img_div = <<<FDIV
-                                        <div class="col-sm-2 checkboxgroup">
-                                            <label for="my_radio_button_id{$id}"><img height="160px" src="{$theme_file_path}" width="100%"></label>
-                                            <p class="m-0">{$theme_title}</p><input id="my_radio_button_id{$id}" name="stylesheet" type="radio" value="{$theme_value}">
-                                        </div>
-FDIV;
+            $img_div = "                <div class='col-sm-2 checkboxgroup'>
+                                            <label for='my_radio_button_id" . attr($id) . "'><img height='160px' src='" . attr($theme_file_path) . "' width='100%'></label>
+                                            <p class='m-0'>" . text($theme_title) . "</p><input id='my_radio_button_id" . attr($id) . "' name='stylesheet' type='radio' value='" . attr($theme_value) . "'>
+                                        </div>";
             $theme_img_number = $i % 6; //to ensure that last file in array will always generate 5 and will end the row
             switch ($theme_img_number) {
                 case 0: //start row
@@ -1514,6 +1582,10 @@ DSTD;
 
     public function displayNewThemeDiv()
     {
+        // cloned sites don't get a chance to set a new theme
+        if (!$this->new_theme) {
+            $this->new_theme = $this->getCurrentTheme();
+        }
         $theme_file_name = $this->new_theme;
         $arr_extracted_file_name = $this->extractFileName($theme_file_name);
         $theme_value = $arr_extracted_file_name['theme_value'];

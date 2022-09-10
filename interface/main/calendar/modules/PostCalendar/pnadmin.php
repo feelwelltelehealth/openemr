@@ -30,6 +30,8 @@
 use OpenEMR\Common\Acl\AclMain;
 use OpenEMR\Common\Acl\AclExtended;
 use OpenEMR\Core\Header;
+use OpenEMR\Events\Core\ScriptFilterEvent;
+use OpenEMR\Events\Core\StyleFilterEvent;
 
 //=========================================================================
 //  Load the API Functions
@@ -229,7 +231,7 @@ EOF;
         $output->FormHidden("newactive", $newactive);
         $output->FormHidden("newsequence", $newsequence);
         $output->FormHidden("newaco", $newaco);
-        $output->Text(_PC_ADD_CAT . $newname . '.');
+        $output->Text(_PC_ADD_CAT . text($newname) . '.');
         $output->Linebreak();
     }
     $output->Text(_PC_MODIFY_CATS);
@@ -489,8 +491,17 @@ function postcalendar_admin_categories($msg = '', $e = '', $args = array())
             $all_categories[$m]["descTranslate"] = xl($tempDescription);
         }
     }
-    $tpl->assign('globals', $GLOBALS);
+    $scriptFilterEvent = new ScriptFilterEvent('pnadmin.php');
+    $scriptFilterEvent->setContextArgument('viewtype', 'admin');
+    $calendarScripts = $GLOBALS['kernel']->getEventDispatcher()->dispatch($scriptFilterEvent, ScriptFilterEvent::EVENT_NAME);
 
+    $styleFilterEvent = new StyleFilterEvent('pnadmin.php');
+    $styleFilterEvent->setContextArgument('viewtype', 'admin');
+    $calendarStyles = $GLOBALS['kernel']->getEventDispatcher()->dispatch($styleFilterEvent, StyleFilterEvent::EVENT_NAME);
+
+    $tpl->assign('globals', $GLOBALS);
+    $tpl->assign('HEADER_SCRIPTS', $calendarScripts->getScripts());
+    $tpl->assign('HEADER_STYLES', $calendarStyles->getStyles());
     $tpl->assign_by_ref('TPL_NAME', $template_name);
     $tpl->assign('FUNCTION', pnVarCleanFromInput('func'));
     $tpl->assign_by_ref('ModuleName', $modname);

@@ -23,8 +23,8 @@
 
 use OpenEMR\Core\Header;
 use OpenEMR\Common\Auth\OpenIDConnect\Repositories\ScopeRepository;
+use OpenEMR\FHIR\Config\ServerConfig;
 use OpenEMR\RestControllers\AuthorizationController;
-use OpenEMR\Services\FacilityService;
 
 // not sure if we need the site id or not...
 $ignoreAuth = true;
@@ -37,18 +37,32 @@ if (empty($GLOBALS['rest_fhir_api'])) {
 }
 
 // This code allows configurable positioning in the login page
-$loginrow = "row login-row align-items-center m-5";
+$logoarea = "py-2 px-2 py-md-3 px-md-5 order-1 bg-primary";
+$formarea = "py-3 px-2 p-sm-5 bg-white order-2";
+$loginrow = "row login-row bg-white shadow-lg align-items-center my-sm-5";
 
-if ($GLOBALS['login_page_layout'] == 'left') {
-    $logoarea = "col-md-6 login-bg-left py-3 px-5 py-md-login order-1 order-md-2";
-    $formarea = "col-md-6 p-5 login-area-left order-2 order-md-1";
-} else if ($GLOBALS['login_page_layout'] == 'right') {
-    $logoarea = "col-md-6 login-bg-right py-3 px-5 py-md-login order-1 order-md-1";
-    $formarea = "col-md-6 p-5 login-area-right order-2 order-md-2";
-} else {
-    $logoarea = "col-12 login-bg-center py-3 px-5 order-1";
-    $formarea = "col-12 p-5 login-area-center order-2";
-    $loginrow = "row login-row login-row-center align-items-center";
+// Apply these classes to the logo area if the login page is left or right
+$lrArr = ['left', 'right'];
+$logoarea .= (in_array($GLOBALS['login_page_layout'], $lrArr)) ? " col-md-6" : " col-md-12";
+$formarea .= (in_array($GLOBALS['login_page_layout'], $lrArr)) ? " col-md-6" : " col-md-12";
+
+// More finite control on a per-setting basis
+switch ($GLOBALS['login_page_layout']) {
+    case 'left':
+        $logoarea .= " order-md-2";
+        $formarea .= " order-md-1";
+        break;
+
+    case 'right':
+        $logoarea .= " order-md-1";
+        $formarea .= " order-md-2";
+        break;
+
+    default:
+        $logoarea .= " order-1";
+        $formarea .= " col-12";
+        $loginrow .= " login-row-center";
+        break;
 }
 
 // TODO: adunsulag find out where our openemr name comes from
@@ -58,7 +72,7 @@ $scopeRepo = new ScopeRepository(RestConfig::GetInstance());
 $scopes = $scopeRepo->getCurrentSmartScopes();
 // TODO: adunsulag there's gotta be a better way for this url...
 $fhirRegisterURL = AuthorizationController::getAuthBaseFullURL() . AuthorizationController::getRegistrationPath();
-$fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationController::getTokenPath();
+$audienceUrl = (new ServerConfig())->getFhirUrl();
 ?>
 <html>
 <head>
@@ -98,6 +112,7 @@ $fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationCon
                 appRegister.contacts.push(document.querySelector("#contactEmail").value);
                 appRegister.jwks_uri = document.querySelector("#jwksUri").value;
                 appRegister.jwks = document.querySelector("#jwks").value;
+                appRegister.application_type = document.querySelector("input[name='appType']:checked").value || "private";
 
                 if (appRegister.jwks.trim() != "") {
                     try {
@@ -113,6 +128,15 @@ $fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationCon
                 let scopes = [];
                 let scopeInputs =  document.querySelectorAll('input.app-scope:checked');
                 for (let scope of scopeInputs) {
+                    if (appRegister.application_type != 'private')
+                    {
+                        // if we are not a private app don't let offline_access or system scopes be granted
+                        // NOTE: this is just a convenience as the server prevents it too.
+                        if (scope.value == 'offline_access'
+                            || scope.value.match(/^system\//)) {
+                            continue;
+                        }
+                    }
                     scopes.push(scope.value);
                 }
                 appRegister.scope = scopes.join(" "); // combine the scopes selected.
@@ -172,11 +196,106 @@ $fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationCon
                     scope.checked = isChecked;
                 }
             }
+            function hideNodeFunction(node)
+            {
+                if (node.checked !== undefined)
+                {
+                    node.checked = false;
+                }
+                node.parentNode.classList.add("d-none");
+            }
+            function showNodeFunction(node)
+            {
+                if (node.checked !== undefined)
+                {
+                    node.checked = true;
+                }
+
+                if (node.parentNode.classList.contains('d-none')) {
+                    node.parentNode.classList.remove("d-none");
+                }
+            }
+            function togglePatientTypeFields(event) {
+                if (!event.target)
+                {
+                    return;
+                }
+                let val = event.target.value;
+                if (val == 'single') {
+                    document.querySelectorAll("input[value^='user/']").forEach(hideNodeFunction);
+                    document.querySelectorAll("input[value^='patient/']").forEach(showNodeFunction);
+                    toggleSystemFunctionality(false);
+                } else if (val == 'multiple') {
+                    toggleSystemFunctionality(false);
+                    document.querySelectorAll("input[value^='user/']").forEach(showNodeFunction);
+                    document.querySelectorAll("input[value^='patient/']").forEach(hideNodeFunction);
+                } else if (val == 'client') {
+                    document.querySelectorAll("input[value^='user/']").forEach(hideNodeFunction);
+                    document.querySelectorAll("input[value^='patient/']").forEach(hideNodeFunction);
+                    toggleSystemFunctionality(true);
+                } else if (val == 'all') {
+
+                    let selected =document.querySelector("input[name='appType']:checked");
+                    if (selected && selected.value == "private") {
+                        toggleSystemFunctionality(true);
+                    }
+                    document.querySelectorAll("input[value^='user/']").forEach(showNodeFunction);
+                    document.querySelectorAll("input[value^='patient/']").forEach(showNodeFunction);
+                }
+            }
+            function toggleAppTypeFields(event)
+            {
+                if (!event.target)
+                {
+                    return;
+                }
+                let val = event.target.value;
+
+                if (val === 'private')
+                {
+                    toggleSystemFunctionality(true);
+                    document.querySelectorAll("input[value='offline_access']").forEach(showNodeFunction);
+                    document.querySelectorAll("#clientSecretID").forEach(showNodeFunction);
+                    document.querySelectorAll("#patientTypeClient").forEach(showNodeFunction);
+                    document.querySelectorAll("label[for='patientTypeClient']").forEach(showNodeFunction);
+
+                }
+                else if (val == 'public')
+                {
+                    toggleSystemFunctionality(false);
+                    document.querySelectorAll("input[value='offline_access']").forEach(hideNodeFunction);
+                    document.querySelectorAll("#clientSecretID").forEach(hideNodeFunction);
+                    document.querySelectorAll("#patientTypeClient").forEach(hideNodeFunction);
+                    document.querySelectorAll("label[for='patientTypeClient']").forEach(hideNodeFunction);
+                }
+            }
+
+            function toggleSystemFunctionality(enabled) {
+                if (enabled) {
+                    document.getElementById('systemSetup').classList.remove("d-none");
+                    document.querySelectorAll("input[value^='system/']").forEach(showNodeFunction);
+                } else {
+                    document.querySelectorAll("input[value^='system/']").forEach(hideNodeFunction);
+                    document.getElementById('systemSetup').classList.add("d-none");
+                }
+            }
 
             window.addEventListener('load', function() {
                 var scopeSelectAll = document.querySelectorAll('.select-all-toggle');
                 for (var element of scopeSelectAll) {
                     element.addEventListener('click', toggleSelectAll);
+                }
+
+                var appTypes = document.querySelectorAll("input[name='appType']");
+                for (var element of appTypes)
+                {
+                    element.addEventListener('click', toggleAppTypeFields);
+                }
+
+                var patientTypes = document.querySelectorAll("input[name='patientType']");
+                for (var element of patientTypes)
+                {
+                    element.addEventListener('click', togglePatientTypeFields);
                 }
 
                 document.querySelector('#submit').addEventListener('click', registerApp);
@@ -187,24 +306,28 @@ $fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationCon
 <body class="register-app">
 <form id="app_form" method="POST" autocomplete="off">
     <div class="<?php echo $loginrow; ?> card m-5">
-        <div class="<?php echo $logoarea; ?>">
+        <div class="<?php echo attr($logoarea); ?>">
             <?php $extraLogo = $GLOBALS['extra_logo_login']; ?>
             <?php if ($extraLogo) { ?>
                 <div class="text-center">
-                    <span class="d-inline-block w-40"><?php echo file_get_contents($GLOBALS['images_static_absolute'] . "/login-logo.svg"); ?></span>
+                    <span class="d-inline-block w-40">
+                        <?php echo file_get_contents($GLOBALS['images_static_absolute'] . "/login-logo.svg"); ?>
+                    </span>
                     <span class="d-inline-block w-15 login-bg-text-color"><i class="fas fa-plus fa-2x"></i></span>
-                    <span class="d-inline-block w-40"><?php echo $logocode; ?></span>
+                    <span class="d-inline-block w-40">
+                        <?php echo $logocode; ?>
+                    </span>
                 </div>
             <?php } else { ?>
                 <div class="mx-auto m-4 w-75">
                     <?php echo file_get_contents($GLOBALS['images_static_absolute'] . "/login-logo.svg"); ?>
                 </div>
             <?php } ?>
+            <?php if ($GLOBALS['show_label_login']) { ?>
             <div class="text-center login-title-label">
-                <?php if ($GLOBALS['show_label_login']) { ?>
                     <?php echo text($openemr_name); ?>
-                <?php } ?>
             </div>
+            <?php } ?>
             <?php
             // Figure out how to display the tiny logos
             $t1 = $GLOBALS['tiny_logo_1'];
@@ -219,12 +342,54 @@ $fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationCon
                     <div class="col-sm-6"><?php echo $tinylogocode2;?></div>
                 </div>
             <?php } ?>
-            <p class="text-center lead font-weight-normal login-bg-text-color"><?php echo xlt('The most popular open-source Electronic Health Record and Medical Practice Management solution.'); ?></p>
-            <p class="text-center small"><a href="../../acknowledge_license_cert.html" class="login-bg-text-color" target="main"><?php echo xlt('Acknowledgments, Licensing and Certification'); ?></a></p>
+            <p class="text-center lead font-weight-normal login-bg-text-color text-white"><?php echo xlt('The most popular open-source Electronic Health Record and Medical Practice Management solution.'); ?></p>
+            <p class="text-center small"><a href="../../acknowledge_license_cert.html" class="login-bg-text-color text-white" target="main"><?php echo xlt('Acknowledgments, Licensing and Certification'); ?></a></p>
         </div>
         <div class="<?php echo $formarea; ?>">
             <h3 class="card-title text-center"><?php echo xlt("App Registration Form"); ?></h3>
             <div>
+                <div class="row">
+                    <div class="col">
+                        <h2><?php echo xlt("Application Type"); ?></h2>
+                        <p><?php echo xlt("Confidential clients must be able to securely safeguard a secret."); ?></p>
+                        <p><?php echo xlt("If your application cannot keep a secret (such as an application that runs in a web browser) you should use the public application type."); ?></p>
+                    </div>
+                </div>
+                <div class="form-check form-check-inline">
+                    <input type="radio" class="form-check-input" id="appTypeConfidential" name="appType" value="private" checked="checked"/>
+                    <label for="appTypeConfidential" class="form-check-label pr-2"><?php echo xlt('Confidential'); ?></label>
+                    <input type="radio" class="form-check-input" id="appTypePublic" name="appType" value="public"/>
+                    <label for="appTypePublic" class="form-check-label"><?php echo xlt('Public'); ?></label>
+                </div>
+                <div class="row">
+                    <div class="col">
+                        <h2><?php echo xlt("Application Context"); ?></h2>
+                    </div>
+                </div>
+                <div class="row pl-3 pr-3">
+                    <div class="col">
+                        <input type="radio" class="form-check-input" id="patientTypeSingle" name="patientType" value="single"/>
+                        <label for="patientTypeSingle" class="form-check-label pr-3"><?php echo xlt('Single Patient Application'); ?></label>
+                    </div>
+                    <div class="col">
+                        <input type="radio" class="form-check-input" id="patientTypeMultiple" name="patientType" value="multiple"/>
+                        <label for="patientTypeMultiple" class="form-check-label pr-3"><?php echo xlt('Multiple Patients Application'); ?></label>
+                    </div>
+                    <div class="col">
+                        <input type="radio" class="form-check-input" id="patientTypeClient" name="patientType" value="client"/>
+                        <label for="patientTypeClient" class="form-check-label pr-3"><?php echo xlt('System Client Application'); ?></label>
+                    </div>
+                    <div class="col">
+                        <input type="radio" class="form-check-input" id="patientTypeAll" name="patientType" value="all" checked="checked"/>
+                        <label for="patientTypeAll" class="form-check-label"><?php echo xlt('Multipurpose Application'); ?></label>
+                    </div>
+                </div>
+                <div class="row">
+                    <div class="col alert alert-info">
+                        <p><?php echo xlt("system, user, and offline_access scopes require confidential app permissions."); ?></p>
+                        <p><?php echo xlt("Confidential apps are applications that are able to safely and securely store a secret. Browser based and many mobile applications do not satisfy this security constraint"); ?></p>
+                    </div>
+                </div>
                 <div class="form-group">
                     <label for="appName" class="text-right"><?php echo xlt('App Name'); ?>:</label>
                     <input type="text" class="form-control" id="appName" name="appName" placeholder="<?php echo xla('App Name'); ?>" />
@@ -251,6 +416,8 @@ $fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationCon
                     <?php echo xlt("Scopes Requested"); ?>:
                     <input type="button" class="select-all-toggle toggle-on btn btn-secondary d-none" value="<?php echo xlt('Select all'); ?>" />
                     <input type="button" class="select-all-toggle toggle-off btn btn-secondary" value="<?php echo xlt('Unselect all'); ?>" />
+                    <input type="button" class="select-single-patient btn btn-secondary d-none" value="<?php echo xlt('Single Patient Application'); ?>" />
+                    <input type="button" class="select-multi-patient btn btn-secondary d-none" value="<?php echo xlt('Multiple Patients Application'); ?>" />
                     <div class="list-group">
                     <?php foreach ($scopes as $scope) : ?>
                         <label class="list-group-item m-0">
@@ -260,20 +427,25 @@ $fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationCon
                     <?php endforeach; ?>
                     </div>
                 </div>
-                <h3 class="text-center"><?php echo xlt("The following items are required for System Scopes"); ?></h3>
-                <hr />
-                <div class="form-group">
-                    <label for="jwksUri" class="text-right"><?php echo xlt('JSON Web Key Set URI'); ?>:</label>
-                    <input type="text" class="form-control" id="jwksUri" name="jwksUri" placeholder="<?php echo xla('URI'); ?>" />
-                </div>
-                <div class="form-group">
-                    <label for="jwks" class="text-right"><?php echo xlt('JSON Web Key Set (Note a hosted web URI is preferred and this feature may be removed in future SMART versions)'); ?>:</label>
-                    <textarea class="form-control" id="jwks" name="jwks" rows="5"></textarea>
+                <div class="row" id="systemSetup">
+                    <div class="col">
+                        <h3 class="text-center"><?php echo xlt("The following items are required for System Scopes"); ?></h3>
+                        <hr />
+                        <div class="form-group">
+                            <label for="jwksUri" class="text-right"><?php echo xlt('JSON Web Key Set URI'); ?>:</label>
+                            <input type="text" class="form-control" id="jwksUri" name="jwksUri" placeholder="<?php echo xla('URI'); ?>" />
+                        </div>
+                        <div class="form-group">
+                            <label for="jwks" class="text-right"><?php echo xlt('JSON Web Key Set (Note a hosted web URI is preferred and this feature may be removed in future SMART versions)'); ?>:</label>
+                            <textarea class="form-control" id="jwks" name="jwks" rows="5"></textarea>
+                        </div>
+                    </div>
                 </div>
 
                 <div class="form-group">
                     <input type="button" class="form-control btn btn-primary" id="submit" name="submit" value="<?php echo xla('Submit'); ?>" (onClick)="registerApp();" />
                 </div>
+
                 <div class="apiResponse hidden">
                     <div class="form-group">
                         <label for="clientID" class="text-right"><?php echo xlt('Client APP ID:'); ?></label>
@@ -285,7 +457,7 @@ $fhirTokenUrl = AuthorizationController::getAuthBaseFullURL() . AuthorizationCon
                     </div>
                     <div class="form-group">
                         <label for="audURL" class="text-right"><?php echo xlt('Aud URI (use this in the "aud" claim of your JWT)'); ?></label>
-                        <input type="text" disabled class="form-control" id="audURL" name="audURL" value="<?php echo attr($fhirTokenUrl); ?>" />
+                        <input type="text" disabled class="form-control" id="audURL" name="audURL" value="<?php echo attr($audienceUrl); ?>" />
                     </div>
                 </div>
                 <div class="form-group errorResponse hidden">

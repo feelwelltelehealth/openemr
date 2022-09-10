@@ -18,9 +18,9 @@ if ($response !== true) {
     die(htmlspecialchars($response));
 }
 
+use Dotenv\Dotenv;
 use OpenEMR\Core\Kernel;
 use OpenEMR\Core\ModulesApplication;
-use Dotenv\Dotenv;
 
 // Throw error if the php openssl module is not installed.
 if (!(extension_loaded('openssl'))) {
@@ -85,6 +85,31 @@ if (preg_match("/^[^\/]/", $web_root)) {
 //  set manually here:
 //   $webserver_root = "/var/www/openemr";
 //   $web_root =  "/openemr";
+
+$ResolveServerHost = static function () {
+    $scheme = ($_SERVER['REQUEST_SCHEME'] ?? 'https') . "://";
+    $possibleHostSources = array('HTTP_X_FORWARDED_HOST', 'HTTP_HOST', 'SERVER_NAME', 'SERVER_ADDR');
+    $sourceTransformations = array(
+        "HTTP_X_FORWARDED_HOST" => function ($value) {
+            $elements = explode(',', $value);
+            return trim(end($elements));
+        }
+    );
+    $host = '';
+    foreach ($possibleHostSources as $source) {
+        if (!empty($host)) {
+            break;
+        }
+        if (empty($_SERVER[$source])) {
+            continue;
+        }
+        $host = $_SERVER[$source];
+        if (array_key_exists($source, $sourceTransformations)) {
+            $host = $sourceTransformations[$source]($host);
+        }
+    }
+    return rtrim(trim($scheme . $host), "/");
+};
 
 // Debug function. Can expand for longer trace or file info.
 function GetCallingScriptName()
@@ -175,19 +200,6 @@ $GLOBALS['OE_SITE_DIR'] = $GLOBALS['OE_SITES_BASE'] . "/" . $_SESSION['site_id']
 // Set a site-specific uri root path.
 $GLOBALS['OE_SITE_WEBROOT'] = $web_root . "/sites/" . $_SESSION['site_id'];
 
-// Collecting the utf8 disable flag from the sqlconf.php file in order
-// to set the correct html encoding. utf8 vs iso-8859-1. If flag is set
-// then set to iso-8859-1.
-require_once(__DIR__ . "/../library/sqlconf.php");
-if (!$disable_utf8_flag) {
-    ini_set('default_charset', 'utf-8');
-    $HTML_CHARSET = "UTF-8";
-    mb_internal_encoding('UTF-8');
-} else {
-    ini_set('default_charset', 'iso-8859-1');
-    $HTML_CHARSET = "ISO-8859-1";
-    mb_internal_encoding('ISO-8859-1');
-}
 
 // Root directory, relative to the webserver root:
 $GLOBALS['rootdir'] = "$web_root/interface";
@@ -227,16 +239,22 @@ $GLOBALS['edi_271_file_path'] = $GLOBALS['OE_SITE_DIR'] . "/documents/edi/";
 
 //  Check necessary writable paths (add them if do not exist)
 if (! is_dir($GLOBALS['OE_SITE_DIR'] . '/documents/smarty/gacl')) {
-    mkdir($GLOBALS['OE_SITE_DIR'] . '/documents/smarty/gacl', 0755, true);
+    if (!mkdir($concurrentDirectory = $GLOBALS['OE_SITE_DIR'] . '/documents/smarty/gacl', 0755, true) && !is_dir($concurrentDirectory)) {
+        throw new RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+    }
 }
 if (! is_dir($GLOBALS['OE_SITE_DIR'] . '/documents/smarty/main')) {
-    mkdir($GLOBALS['OE_SITE_DIR'] . '/documents/smarty/main', 0755, true);
+    if (!mkdir($concurrentDirectory = $GLOBALS['OE_SITE_DIR'] . '/documents/smarty/main', 0755, true) && !is_dir($concurrentDirectory)) {
+        throw new RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+    }
 }
 
 //  Set and check that necessary writeable path exist for mPDF tool
 $GLOBALS['MPDF_WRITE_DIR'] = $GLOBALS['OE_SITE_DIR'] . '/documents/mpdf/pdf_tmp';
 if (! is_dir($GLOBALS['MPDF_WRITE_DIR'])) {
-    mkdir($GLOBALS['MPDF_WRITE_DIR'], 0755, true);
+    if (!mkdir($concurrentDirectory = $GLOBALS['MPDF_WRITE_DIR'], 0755, true) && !is_dir($concurrentDirectory)) {
+        throw new RuntimeException(sprintf('Directory "%s" was not created', $concurrentDirectory));
+    }
 }
 
 // Includes composer autoload
@@ -265,12 +283,6 @@ if (file_exists("{$webserver_root}/.env")) {
     $dotenv->load();
 }
 
-// This will open the openemr mysql connection.
-require_once(__DIR__ . "/../library/sql.inc");
-
-// Include the version file
-require_once(__DIR__ . "/../version.php");
-
 // The logging level for common/logging/logger.php
 // Value can be TRACE, DEBUG, INFO, WARN, ERROR, or OFF:
 //    - DEBUG/INFO are great for development
@@ -278,18 +290,31 @@ require_once(__DIR__ . "/../version.php");
 //    - TRACE is useful when debugging hard to spot bugs
 $GLOBALS["log_level"] = "OFF";
 
-// Load twig support
-$twigLoader = new Twig\Loader\FilesystemLoader($webserver_root . '/templates');
-$twigEnv = new Twig\Environment($twigLoader, ['autoescape' => false]);
-$twigEnv->addExtension(new OpenEMR\Core\TwigExtension());
-$GLOBALS['twig'] = $twigEnv;
-
 try {
     /** @var Kernel */
     $GLOBALS["kernel"] = new Kernel();
 } catch (\Exception $e) {
     error_log(errorLogEscape($e->getMessage()));
     die();
+}
+
+// This will open the openemr mysql connection.
+require_once(__DIR__ . "/../library/sql.inc");
+
+// Include the version file
+require_once(__DIR__ . "/../version.php");
+
+// Collecting the utf8 disable flag from the sqlconf.php file in order
+// to set the correct html encoding. utf8 vs iso-8859-1. If flag is set
+// then set to iso-8859-1.
+if (!$disable_utf8_flag) {
+    ini_set('default_charset', 'utf-8');
+    $HTML_CHARSET = "UTF-8";
+    mb_internal_encoding('UTF-8');
+} else {
+    ini_set('default_charset', 'iso-8859-1');
+    $HTML_CHARSET = "ISO-8859-1";
+    mb_internal_encoding('ISO-8859-1');
 }
 
 // Defaults for specific applications.
@@ -494,13 +519,21 @@ if (!empty($glrow)) {
 //  more security.
 require_once($GLOBALS['OE_SITE_DIR'] . "/config.php");
 
+// Resolve server globals (use the manual override if set already in globals)
+if (empty($GLOBALS['site_addr_oath'])) {
+    $GLOBALS['site_addr_oath'] = $ResolveServerHost();
+}
+if (empty($GLOBALS['qualified_site_addr'])) {
+    $GLOBALS['qualified_site_addr'] = rtrim($GLOBALS['site_addr_oath'] . trim($GLOBALS['webroot']), "/");
+}
+
 // Need to utilize a session since library/sql.inc is established before there are any globals established yet.
 //  This means that the first time, it will be skipped even if the global is turned on. However,
 //  after that it will then be turned on via the session.
 // Also important to note that changes to this global setting will not take effect during the same
 //  session (ie. user needs to logout) since not worth it to use resources to open session and write to it
 //  for every call to interface/globals.php .
-$_SESSION["enable_database_connection_pooling"] = $GLOBALS["enable_database_connection_pooling"];
+$_SESSION["enable_database_connection_pooling"] = $GLOBALS["enable_database_connection_pooling"] ?? null;
 
 // If >0 this will enforce a separate PHP session for each top-level
 // browser window.  You must log in separately for each.  This is not
@@ -531,26 +564,6 @@ $tmore = xl('(More)');
 //   Note this label gets translated here via the xl function
 //    -if you don't want it translated, then strip the xl function away
 $tback = xl('(Back)');
-
-$versionService = new \OpenEMR\Services\VersionService();
-$version = $versionService->fetch();
-
-if (!empty($version)) {
-    //Version tag
-    $patch_appending = "";
-    //Collected below function call to a variable, since unable to directly include
-    // function calls within empty() in php versions < 5.5 .
-    $version_getrealpatch = $version['v_realpatch'];
-    if (($version['v_realpatch'] != '0') && (!(empty($version_getrealpatch)))) {
-        $patch_appending = " (" . $version['v_realpatch'] . ")";
-    }
-
-    $openemr_version = $version['v_major'] . "." . $version['v_minor'] . "." . $version['v_patch'];
-    $openemr_version .= $version['v_tag'] . $patch_appending;
-} else {
-    $openemr_version = xl('Unknown version');
-}
-$GLOBALS['openemr_version'] = $openemr_version;
 
 $srcdir = $GLOBALS['srcdir'];
 $login_screen = $GLOBALS['login_screen'];
@@ -660,10 +673,9 @@ function UrlIfImageExists($filename, $append = true)
 // Override temporary_files_dir
 $GLOBALS['temporary_files_dir'] = rtrim(sys_get_temp_dir(), '/');
 
-// turn off PHP compatibility warnings
-ini_set("session.bug_compat_warn", "off");
+error_reporting(error_reporting() & ~E_USER_DEPRECATED & ~E_USER_WARNING);
 // user debug mode
-if ((int) $GLOBALS['user_debug'] > 1) {
-    error_reporting(error_reporting() & ~E_WARNING & ~E_NOTICE & ~E_USER_WARNING);
+if (!empty($GLOBALS['user_debug']) && ((int) $GLOBALS['user_debug'] > 1)) {
+    error_reporting(error_reporting() & ~E_WARNING & ~E_NOTICE & ~E_USER_WARNING & ~E_USER_DEPRECATED);
     ini_set('display_errors', 1);
 }

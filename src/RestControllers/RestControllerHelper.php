@@ -13,16 +13,17 @@
 namespace OpenEMR\RestControllers;
 
 use OpenEMR\Common\Logging\SystemLogger;
-use OpenEMR\Common\System\System;
-use OpenEMR\FHIR\FhirSearchParameterType;
-use OpenEMR\FHIR\R4\FHIRDomainResource\FHIROperationDefinition;
+use OpenEMR\Events\RestApiExtend\RestApiCreateEvent;
+use OpenEMR\Events\RestApiExtend\RestApiResourceServiceEvent;
+use OpenEMR\Events\RestApiExtend\RestApiScopeEvent;
+use OpenEMR\Services\FHIR\IResourceSearchableService;
+use OpenEMR\Services\Search\FhirSearchParameterDefinition;
+use OpenEMR\Services\Search\SearchFieldType;
 use OpenEMR\FHIR\R4\FHIRDomainResource\FHIRPatient;
 use OpenEMR\FHIR\R4\FHIRElement\FHIRCanonical;
 use OpenEMR\FHIR\R4\FHIRElement\FHIRCode;
 use OpenEMR\FHIR\R4\FHIRElement\FHIRExtension;
-use OpenEMR\FHIR\R4\FHIRElement\FHIRReference;
 use OpenEMR\FHIR\R4\FHIRElement\FHIRRestfulCapabilityMode;
-use OpenEMR\FHIR\R4\FHIRElement\FHIRString;
 use OpenEMR\FHIR\R4\FHIRElement\FHIRTypeRestfulInteraction;
 use OpenEMR\FHIR\R4\FHIRResource;
 use OpenEMR\FHIR\R4\FHIRResource\FHIRCapabilityStatement\FHIRCapabilityStatementInteraction;
@@ -30,6 +31,7 @@ use OpenEMR\FHIR\R4\FHIRResource\FHIRCapabilityStatement\FHIRCapabilityStatement
 use OpenEMR\FHIR\R4\FHIRResource\FHIRCapabilityStatement\FHIRCapabilityStatementResource;
 use OpenEMR\FHIR\R4\FHIRResource\FHIRCapabilityStatement\FHIRCapabilityStatementRest;
 use OpenEMR\Services\FHIR\IResourceUSCIGProfileService;
+use OpenEMR\Validators\ProcessingResult;
 
 class RestControllerHelper
 {
@@ -40,8 +42,13 @@ class RestControllerHelper
 
     /**
      * The default FHIR services class namespace
+     * TODO: should we build a fhir service locator class?  There are two places this is now used, in this class and
+     * in the FhirProvenanceService...
      */
     const FHIR_SERVICES_NAMESPACE = "OpenEMR\\Services\\FHIR\\Fhir";
+
+    // @see https://www.hl7.org/fhir/search.html#table
+    const FHIR_SEARCH_CONTROL_PARAM_REV_INCLUDE_PROVENANCE = "Provenance:target";
 
     /**
      * Configures the HTTP status code and payload returned within a response.
@@ -109,15 +116,19 @@ class RestControllerHelper
         if (!$processingResult->isValid()) {
             http_response_code(400);
             $httpResponseBody["validationErrors"] = $processingResult->getValidationMessages();
+            (new SystemLogger())->debug("RestControllerHelper::handleProcessingResult() 400 error", ['validationErrors' => $processingResult->getValidationMessages()]);
         } elseif ($processingResult->hasInternalErrors()) {
             http_response_code(500);
             $httpResponseBody["internalErrors"] = $processingResult->getInternalErrors();
+            (new SystemLogger())->debug("RestControllerHelper::handleProcessingResult() 500 error", ['internalErrors' => $processingResult->getValidationMessages()]);
         } else {
             http_response_code($successStatusCode);
             $dataResult = $processingResult->getData();
+            $recordsCount = count($dataResult);
+            (new SystemLogger())->debug("RestControllerHelper::handleFhirProcessingResult() Records found", ['count' => $recordsCount]);
 
             if (!$isMultipleResultResponse) {
-                $dataResult = (count($dataResult) === 0) ? [] : $dataResult[0];
+                $dataResult = ($recordsCount === 0) ? [] : $dataResult[0];
             }
 
             $httpResponseBody["data"] = $dataResult;
@@ -136,19 +147,24 @@ class RestControllerHelper
      * @param        $successStatusCode - The HTTP status code to return for a successful operation that completes without error.
      * @return array|mixed
      */
-    public static function handleFhirProcessingResult($processingResult, $successStatusCode)
+    public static function handleFhirProcessingResult(ProcessingResult $processingResult, $successStatusCode)
     {
         $httpResponseBody = [];
         if (!$processingResult->isValid()) {
             http_response_code(400);
             $httpResponseBody["validationErrors"] = $processingResult->getValidationMessages();
+            (new SystemLogger())->debug("RestControllerHelper::handleFhirProcessingResult() 400 error", ['validationErrors' => $processingResult->getValidationMessages()]);
+        } elseif (count($processingResult->getData()) <= 0) {
+            http_response_code(404);
+            (new SystemLogger())->debug("RestControllerHelper::handleFhirProcessingResult() 404 records not found");
         } elseif ($processingResult->hasInternalErrors()) {
             http_response_code(500);
+            (new SystemLogger())->debug("RestControllerHelper::handleFhirProcessingResult() 500 error", ['internalErrors' => $processingResult->getValidationMessages()]);
             $httpResponseBody["internalErrors"] = $processingResult->getInternalErrors();
         } else {
             http_response_code($successStatusCode);
             $dataResult = $processingResult->getData();
-
+            (new SystemLogger())->debug("RestControllerHelper::handleFhirProcessingResult() Records found", ['count' => count($dataResult)]);
             $httpResponseBody = $dataResult[0];
         }
 
@@ -160,11 +176,27 @@ class RestControllerHelper
         if (empty($service)) {
             return; // nothing to do here as the service isn't defined.
         }
-        $capResource->addSearchInclude('*');
-        foreach ($service->getSearchParams() as $fhirSearchField => $searchDefinition) {
-            $paramExists = false;
 
-            $type = $searchDefinition['type'] ?? FhirSearchParameterType::STRING;
+        if (!$service instanceof IResourceSearchableService) {
+            return; // nothing to do here as the source is not searchable.
+        }
+
+        if (empty($capResource->getSearchInclude())) {
+            $capResource->addSearchInclude('*');
+        }
+        if ($service instanceof IResourceUSCIGProfileService && empty($capResource->getSearchRevInclude())) {
+            $capResource->addSearchRevInclude(self::FHIR_SEARCH_CONTROL_PARAM_REV_INCLUDE_PROVENANCE);
+        }
+        $searchParams = $service->getSearchParams();
+        $searchParams = is_array($searchParams) ? $searchParams : [];
+        foreach ($searchParams as $fhirSearchField => $searchDefinition) {
+
+            /**
+             * @var FhirSearchParameterDefinition $searchDefinition
+             */
+
+            $paramExists = false;
+            $type = $searchDefinition->getType();
 
             foreach ($capResource->getSearchParam() as $searchParam) {
                 if (strcmp($searchParam->getName(), $fhirSearchField) == 0) {
@@ -199,21 +231,29 @@ class RestControllerHelper
 
     public function addOperations($resource, $items, FHIRCapabilityStatementResource $capResource)
     {
+        // TODO: @adunsulag we need to architect a more generic way of adding operations like we do with resources
         $operation = end($items);
         // we want to skip over anything that's not a resource $operation
-        if ($operation === '$export') {
-            $operationName = strtolower($resource) . '-export';
+        if ($operation == '$export') {
+            if ($resource != '$export') {
+                $operationName = strtolower($resource) . '-export';
+            } else {
+                $operationName = 'export';
+            }
             // define export operation
-            $resource = new FHIRPatient();
-            $operation = new FHIRCapabilityStatementOperation();
-            $operation->setName($operationName);
-            $operation->setDefinition(new FHIRCanonical('http://hl7.org/fhir/uv/bulkdata/OperationDefinition/' . $operationName));
-
-            $extension = new FHIRExtension();
-            $extension->setValueCode(new FHIRCode('SHOULD'));
-            $extension->setUrl('http://hl7.org/fhir/StructureDefinition/capabilitystatement-expectation');
-            $operation->addExtension($extension);
-            $capResource->addOperation($operation);
+            $fhirOperation = new FHIRCapabilityStatementOperation();
+            $fhirOperation->setName($operation);
+            $fhirOperation->setDefinition(new FHIRCanonical('http://hl7.org/fhir/uv/bulkdata/OperationDefinition/' . $operationName));
+            $capResource->addOperation($fhirOperation);
+        } else if ($operation === '$bulkdata-status') {
+            // TODO: @adunsulag we should document in our capability statement how to use the bulkdata-status operation
+        } else if ($operation === '$docref') {
+            $fhirOperation = new FHIRCapabilityStatementOperation();
+            $fhirOperation->setName($operation);
+            $fhirOperation->setDefinition(new FHIRCanonical('http://hl7.org/fhir/us/core/OperationDefinition/docref'));
+            $capResource->addOperation($fhirOperation);
+        } else if (is_string($operation) && strpos($operation, '$') === 0) {
+            (new SystemLogger())->debug("Found operation that is not supported in system", ['resource' => $resource, 'operation' => $operation, 'items' => $items]);
         }
     }
 
@@ -281,9 +321,11 @@ class RestControllerHelper
             if (!in_array($resource, self::IGNORE_ENDPOINT_RESOURCES)) {
                 $service = null;
                 $serviceClass = $this->getFullyQualifiedServiceClassForResource($resource, $serviceClassNameSpace);
+                $serviceClass = self::filterServiceClassForResource($resource, $serviceClass);
                 if (!empty($serviceClass)) {
                     $service = new $serviceClass();
                 }
+
                 if (!array_key_exists($resource, $resourcesHash)) {
                     $capResource = new FHIRCapabilityStatementResource();
                     $capResource->setType(new FHIRCode($resource));
@@ -307,5 +349,23 @@ class RestControllerHelper
             $restItem->addResource($capResource);
         }
         return $restItem;
+    }
+
+    /**
+     * Fires off a system event for the given API resource to filter the serviceClass.  This gives module writers
+     * the opportunity to extend the api, add / remove Implementation Guide profiles and declare different API conformance
+     * @param $resource The api resource that was parsed
+     * @param $serviceClass The service class that was found by default in the system or null if none was found
+     * @return string|null The filtered service class property
+     */
+    private static function filterServiceClassForResource(string $resource, ?string $serviceClass)
+    {
+        if (!empty($GLOBALS['kernel'])) {
+            $dispatcher = $GLOBALS['kernel']->getEventDispatcher();
+            $event = $dispatcher->dispatch(new RestApiResourceServiceEvent($resource, $serviceClass), RestApiResourceServiceEvent::EVENT_HANDLE);
+            return $event->getServiceClass();
+        }
+
+        return $serviceClass;
     }
 }

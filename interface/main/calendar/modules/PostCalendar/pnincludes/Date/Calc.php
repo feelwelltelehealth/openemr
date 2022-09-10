@@ -30,7 +30,6 @@
 
 class Date_Calc
 {
-
     /**
      * Returns the current local date. NOTE: This function
      * retrieves the local date using strftime(), which may
@@ -1636,7 +1635,7 @@ class Date_Calc
     {
         $month = strtolower($month);
         $months = Date_Calc::getMonthNames();
-        while (list($id, $name) = each($months)) {
+        foreach ($months as $id => $name) {
             if (preg_match("/" . addcslashes($month, '/') . "/", strtolower($name))) {
                 return($id);
             }

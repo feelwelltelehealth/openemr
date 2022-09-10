@@ -11,10 +11,10 @@
  * @license   https://github.com/openemr/openemr/blob/master/LICENSE GNU General Public License 3
  */
 
+require_once(__DIR__ . "/../library/patient.inc");
 
 class eRxXMLBuilder
 {
-
     private $globals;
     private $store;
 
@@ -266,14 +266,14 @@ class eRxXMLBuilder
         $eRxCredentials = $this->getGlobals()
             ->getCredentials();
 
-        $elemenet = $this->getDocument()->createElement('Credentials');
-        $elemenet->appendChild($this->createElementTextFieldEmpty('partnerName', $eRxCredentials['0'], xl('NewCrop eRx Partner Name')));
-        $elemenet->appendChild($this->createElementTextFieldEmpty('name', $eRxCredentials['1'], xl('NewCrop eRx Account Name')));
-        $elemenet->appendChild($this->createElementTextFieldEmpty('password', $eRxCredentials['2'], xl('NewCrop eRx Password')));
-        $elemenet->appendChild($this->createElementText('productName', 'OpenEMR'));
-        $elemenet->appendChild($this->createElementText('productVersion', $this->getGlobals()->getOpenEMRVersion()));
+        $element = $this->getDocument()->createElement('Credentials');
+        $element->appendChild($this->createElementTextFieldEmpty('partnerName', $eRxCredentials['0'], xl('NewCrop eRx Partner Name')));
+        $element->appendChild($this->createElementTextFieldEmpty('name', $eRxCredentials['1'], xl('NewCrop eRx Account Name')));
+        $element->appendChild($this->createElementTextFieldEmpty('password', $eRxCredentials['2'], xl('NewCrop eRx Password')));
+        $element->appendChild($this->createElementText('productName', 'OpenEMR'));
+        $element->appendChild($this->createElementText('productVersion', $this->getGlobals()->getOpenEMRVersion()));
 
-        return $elemenet;
+        return $element;
     }
 
     public function getUserRole($authUserId)
@@ -710,6 +710,45 @@ class eRxXMLBuilder
         return $elements;
     }
 
+    public function getPatientDiagnosis($patientId)
+    {
+        $diagnosisData = $this->getStore()
+            ->getPatientDiagnosisByPatientId($patientId);
+
+        $elements = array();
+        while ($diagnosis = sqlFetchArray($diagnosisData)) {
+            if ($diagnosis['diagnosis']) {
+                // For issues that have multiple diagnosis coded, they are semicolon-separated
+                // explode() will return an array containing the individual diagnosis if there is no semicolon
+                $multiple = explode(";", $diagnosis['diagnosis']);
+                foreach ($multiple as $individual) {
+                    $element = $this->getDocument()->createElement('PatientDiagnosis');
+                    $res = explode(":", $individual); //split diagnosis type and code
+
+                    $element->appendChild($this->createElementText('diagnosisID', $res[1]));
+                    $element->appendChild($this->createElementText('diagnosisType', $res[0]));
+
+                    if ($diagnosis['begdate']) {
+                        $element->appendChild($this->createElementText('onsetDate', str_replace("-", "", $diagnosis['begdate'])));
+                    }
+
+                    if ($diagnosis['title']) {
+                        $element->appendChild($this->createElementText('diagnosisName', $diagnosis['title']));
+                    }
+
+                    if ($diagnosis['date']) {
+                        $date = new DateTime($diagnosis['date']);
+                        $element->appendChild($this->createElementText('recordedDate', date_format($date, 'Ymd')));
+                    }
+
+                    $elements[] = $element;
+                }
+            }
+        }
+
+        return $elements;
+    }
+
     public function getPatient($patientId)
     {
         $patientData = $this->getStore()
@@ -721,6 +760,7 @@ class eRxXMLBuilder
         $element->appendChild($this->getPatientAddress($patientData));
         $element->appendChild($this->getPatientContact($patientData));
         $element->appendChild($this->getPatientCharacteristics($patientData));
+        $this->appendChildren($element, $this->getPatientDiagnosis($patientId));
         $this->appendChildren($element, $this->getPatientFreeformHealthplans($patientId));
         $this->appendChildren($element, $this->getPatientFreeformAllergy($patientId));
 
@@ -820,9 +860,15 @@ class eRxXMLBuilder
                 $prescriptionIds[] = $selectPrescriptionId['id'];
             }
 
-            if (count($requestedPrescriptionIds) > 0) {
+            if (
+                is_array($requestedPrescriptionIds) &&
+                count($requestedPrescriptionIds) > 0
+            ) {
                 $elements = array_merge($elements, $this->getPatientPrescriptions($requestedPrescriptionIds));
-            } elseif (count($prescriptionIds) > 0) {
+            } elseif (
+                is_array($requestedPrescriptionIds) &&
+                count($prescriptionIds) > 0
+            ) {
                 $elements = array_merge($elements, $this->getPatientPrescriptions($prescriptionIds));
             } else {
                 $this->getPatientPrescriptions(array(0));

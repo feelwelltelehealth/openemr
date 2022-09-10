@@ -24,6 +24,23 @@ exports.templateId = function (id) {
     };
 };
 
+exports.templateIdExt = function (id, ext) {
+    return {
+        key: "templateId",
+        attributes: {
+            "root": id,
+            "extension": ext
+        }
+    };
+};
+var templateId = function (id) {
+    return {
+        key: "templateId",
+        attributes: {
+            "root": id
+        }
+    };
+};
 exports.templateCode = function (name) {
     var raw = templateCodes[name];
     var result = {
@@ -73,6 +90,15 @@ exports.uniqueId = {
     }
 };
 
+exports.uniqueIdRoot = {
+    key: "id",
+    attributes: {
+        root: function (input, context) {
+            return uuid.v4();
+        }
+    }
+};
+
 exports.statusCodeCompleted = {
     key: "statusCode",
     attributes: {
@@ -94,6 +120,14 @@ exports.statusCodeNew = {
     }
 };
 
+var effectiveDocumentTime = exports.effectiveDocumentTime = {
+    key: "effectiveTime",
+    attributes: {
+        "value": leafLevel.inputProperty("date"),
+    },
+    dataKey: 'meta.ccda_header.date_time'
+};
+
 var effectiveTimeNow = exports.effectiveTimeNow = {
     key: "effectiveTime",
     attributes: {
@@ -104,7 +138,14 @@ var effectiveTimeNow = exports.effectiveTimeNow = {
 var timeNow = exports.timeNow = {
     key: "time",
     attributes: {
-        "value": moment().format("YYYYMMDDHHMMSS"),
+        "value": moment().format("YYYYMMDD"),
+    }
+};
+
+var timeDocumentTime = exports.timeDocumentTime = {
+    key: "time",
+    attributes: {
+        "value": leafLevel.time
     }
 };
 
@@ -188,28 +229,58 @@ exports.nullFlavor = function (name) {
     };
 };
 
+
+var useablePeriod = exports.useablePeriod = {
+    key: "useablePeriod",
+    attributes: {
+        "xmlns:xsi": "http://www.w3.org/2001/XMLSchema-instance",
+        "xsi:type": "IVL_TS"
+    },
+    content: [{
+        key: "low",
+        attributes: {
+            "value": leafLevel.time
+        },
+        dataKey: 'low',
+    }, {
+        key: "high",
+        attributes: {
+            "value": leafLevel.time
+        },
+        dataKey: 'high',
+    }],
+    dataKey: 'date_time',
+    existsWhen: condition.eitherKeyExists('point', 'low', 'high')
+};
+
 var usRealmAddress = exports.usRealmAddress = {
     key: "addr",
     attributes: {
         use: leafLevel.use("use")
     },
     content: [{
-        key: "country",
-        text: leafLevel.inputProperty("country")
-    }, {
-        key: "state",
-        text: leafLevel.inputProperty("state")
-    }, {
-        key: "city",
-        text: leafLevel.inputProperty("city")
-    }, {
-        key: "postalCode",
-        text: leafLevel.inputProperty("zip")
-    }, {
         key: "streetAddressLine",
         text: leafLevel.input,
-        dataKey: "street_lines"
-    }],
+        dataKey: "street_lines",
+        existsWhen: condition.propertyNotEmpty("street_lines[0]")
+    }, {
+        key: "city",
+        text: leafLevel.inputProperty("city"),
+        existsWhen: condition.propertyNotEmpty("city")
+    }, {
+        key: "state",
+        text: leafLevel.inputProperty("state"),
+        existsWhen: condition.propertyNotEmpty("state")
+    }, {
+        key: "postalCode",
+        text: leafLevel.inputProperty("zip"),
+        existsWhen: condition.propertyNotEmpty("zip")
+    }, {
+        key: "country",
+        text: leafLevel.inputProperty("country"),
+        existsWhen: condition.propertyNotEmpty("country")
+    }, useablePeriod,
+    ],
     dataKey: "address"
 };
 
@@ -245,11 +316,11 @@ var telecom = exports.telecom = {
 var representedOrganization = {
     key: "representedOrganization",
     content: [
-        id, {
+        {
             key: "id",
             attributes: {
+                root: leafLevel.inputProperty("root"),
                 extension: leafLevel.inputProperty("extension"),
-                root: leafLevel.inputProperty("root")
             },
             dataKey: "identity"
         }, {
@@ -257,18 +328,8 @@ var representedOrganization = {
             text: leafLevel.input,
             dataKey: "name"
         },
-        usRealmAddress,
-        telecom, {
-            key: "telecom",
-            attributes: [{
-                use: "WP",
-                value: function (input) {
-                    return input.value.number;
-                }
-            }],
-            existsWhen: condition.keyExists("value"),
-            dataKey: "phone"
-        }
+        //usRealmAddress,
+        //telecom
     ],
     dataKey: "organization"
 };
@@ -276,11 +337,10 @@ var representedOrganization = {
 var assignedEntity = exports.assignedEntity = {
     key: "assignedEntity",
     content: [id, {
-            key: "code",
-            attributes: leafLevel.code,
-            dataKey: "code"
-        },
-
+        key: "code",
+        attributes: leafLevel.code,
+        dataKey: "code"
+    },
         usRealmAddress,
         telecom, {
             key: "assignedPerson",
@@ -292,13 +352,48 @@ var assignedEntity = exports.assignedEntity = {
     existsWhen: condition.eitherKeyExists("address", "identifiers", "organization", "name")
 };
 
+var associatedEntity = exports.associatedEntity = {
+    key: "associatedEntity"
+    , attributes: {
+        classCode: leafLevel.inputProperty("classCode"),
+    },
+    content: [
+        id,
+        {
+            key: "code",
+            attributes: leafLevel.code,
+            dataKey: "code"
+        },
+        usRealmAddress,
+        telecom,
+        {
+            key: "associatedPerson",
+            content: usRealmName,
+            existsWhen: condition.keyExists("name"),
+            attributes: {
+                classCode: "PSN",
+                determinerCode: "INSTANCE"
+            }
+        }
+    ]
+};
+
 exports.author = {
     key: "author",
+    attributes: {
+        typeCode: "AUT"
+    },
     content: [
+        templateId("2.16.840.1.113883.10.20.22.4.119"),
         [effectiveTime, required, key("time")], {
             key: "assignedAuthor",
             content: [
                 id, {
+                    key: "code",
+                    attributes: leafLevel.code,
+                    existsWhen: condition.propertyNotEmpty('code'),
+                    dataKey: "code"
+                }, {
                     key: "assignedPerson",
                     content: usRealmName
                 },
@@ -316,3 +411,59 @@ exports.performer = {
     ],
     dataKey: "performer"
 };
+
+var linkedRepresentedOrganization = {
+    key: "representedOrganization",
+    content: [
+        {
+            key: "id",
+            attributes: {
+                root: leafLevel.inputProperty("root")
+            },
+            dataKey: "identity"
+        }, {
+            key: "name",
+            text: leafLevel.input,
+            dataKey: "name"
+        }
+    ],
+    dataKey: "organization"
+};
+
+exports.actAuthor = {
+    key: "author",
+    content: [
+        templateId("2.16.840.1.113883.10.20.22.4.119"),
+        [effectiveTime, required, key("time")], {
+            key: "assignedAuthor",
+            content: [
+                id, {
+                    key: "assignedPerson",
+                    content: usRealmName
+                },
+                linkedRepresentedOrganization
+            ]
+        }
+    ],
+    dataKey: "author"
+};
+
+var responsibleParty = exports.responsibleParty = {
+    key: "responsibleParty",
+    content: [{
+        key: "assignedEntity",
+        content: [{
+            key: "id",
+            attributes: {
+                root: leafLevel.inputProperty("root")
+            },
+        }, {
+            key: "assignedPerson",
+            content: usRealmName
+        }]
+    }
+    ],
+    dataKey: "responsible_party",
+    existsWhen: condition.propertyValueNotEmpty("name.last")
+};
+

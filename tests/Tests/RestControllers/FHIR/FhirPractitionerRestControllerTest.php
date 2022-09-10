@@ -17,8 +17,11 @@ use OpenEMR\Tests\Fixtures\PractitionerFixtureManager;
  */
 class FhirPractitionerRestControllerTest extends TestCase
 {
-
+    /**
+     * @var FhirPractitionerRestController
+     */
     private $fhirPractitionerController;
+
     private $fixtureManager;
     private $fhirFixture;
 

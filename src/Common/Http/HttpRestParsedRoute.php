@@ -17,7 +17,6 @@ use OpenEMR\Common\Logging\SystemLogger;
 
 class HttpRestParsedRoute
 {
-
     /**
      * Whether the route definition is a valid match against the current request
      * @var bool
@@ -149,7 +148,7 @@ class HttpRestParsedRoute
     private function getRouteMatchExpression($path)
     {
         // Taken from https://stackoverflow.com/questions/11722711/url-routing-regex-php/11723153#11723153
-        return "@^" . preg_replace('/\\\:[a-zA-Z0-9\_\-]+/', '([a-zA-Z0-9\-\_\$]+)', preg_quote($path)) . "$@D";
+        return "@^" . preg_replace('/\\\:[a-zA-Z0-9\_\-]+/', '([a-zA-Z0-9\-\_\$\:]+)', preg_quote($path)) . "$@D";
     }
 
     /**

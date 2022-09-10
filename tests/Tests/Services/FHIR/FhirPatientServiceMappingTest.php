@@ -4,6 +4,8 @@ namespace OpenEMR\Tests\Services\FHIR;
 
 use OpenEMR\FHIR\R4\FHIRElement\FHIRContactPoint;
 use OpenEMR\FHIR\R4\FHIRElement\FHIRIdentifier;
+use OpenEMR\Services\FHIR\Serialization\FhirPatientSerializer;
+use OpenEMR\Services\PatientService;
 use PHPUnit\Framework\TestCase;
 use OpenEMR\Tests\Fixtures\FixtureManager;
 use OpenEMR\Services\FHIR\FhirPatientService;
@@ -21,9 +23,12 @@ use OpenEMR\FHIR\R4\FHIRDomainResource\FHIRPatient;
  */
 class FhirPatientServiceMappingTest extends TestCase
 {
-
     private $fixtureManager;
     private $patientFixture;
+
+    /**
+     * @var FHIRPatient
+     */
     private $fhirPatientFixture;
 
     /**
@@ -34,8 +39,12 @@ class FhirPatientServiceMappingTest extends TestCase
     protected function setUp(): void
     {
         $this->fixtureManager = new FixtureManager();
-        $this->patientFixture = (array) $this->fixtureManager->getSinglePatientFixture();
-        $this->fhirPatientFixture = (array) $this->fixtureManager->getSingleFhirPatientFixture();
+        $this->patientFixture = (array) $this->fixtureManager->getSinglePatientFixtureWithAddressInformation();
+        $fixture = (array) $this->fixtureManager->getSingleFhirPatientFixture();
+//        var_dump($fixture);
+        $this->fhirPatientFixture = FhirPatientSerializer::deserialize($fixture);
+//        var_dump($this->fhirPatientFixture);
+//        die();
         $this->fhirPatientService = new FhirPatientService();
     }
 
@@ -47,8 +56,8 @@ class FhirPatientServiceMappingTest extends TestCase
     private function assertFhirPatientResource(FHIRPatient $fhirPatientResource, $sourcePatientRecord)
     {
         $this->assertEquals($sourcePatientRecord['uuid'], $fhirPatientResource->getId());
-        $this->assertEquals(1, $fhirPatientResource->getMeta()['versionId']);
-        $this->assertNotEmpty($fhirPatientResource->getMeta()['lastUpdated']);
+        $this->assertEquals(1, $fhirPatientResource->getMeta()->getVersionId());
+        $this->assertNotEmpty($fhirPatientResource->getMeta()->getLastUpdated());
 
         $this->assertEquals('generated', $fhirPatientResource->getText()['status']);
         $this->assertNotEmpty($fhirPatientResource->getText()['div']);
@@ -72,10 +81,14 @@ class FhirPatientServiceMappingTest extends TestCase
         $this->assertEquals(1, count($fhirPatientResource->getAddress()));
         $actualAddress = $fhirPatientResource->getAddress()[0];
         $this->assertEquals(1, count($actualAddress->getLine()));
-        $this->assertEquals($sourcePatientRecord['street'], $actualAddress->getLine()[0]);
-        $this->assertEquals($sourcePatientRecord['city'], $actualAddress->getCity());
-        $this->assertEquals($sourcePatientRecord['state'], $actualAddress->getState());
-        $this->assertEquals($sourcePatientRecord['postal_code'], $actualAddress->getPostalCode());
+        $patientAddress = $sourcePatientRecord['addresses'][0];
+        // TODO: we should add period validation here...
+        $this->assertEquals($patientAddress['use'], $actualAddress->getUse());
+        $this->assertEquals($patientAddress['type'], $actualAddress->getType());
+        $this->assertEquals($patientAddress['line1'], $actualAddress->getLine()[0]);
+        $this->assertEquals($patientAddress['city'], $actualAddress->getCity());
+        $this->assertEquals($patientAddress['state'], $actualAddress->getState());
+        $this->assertEquals($patientAddress['postal_code'], $actualAddress->getPostalCode());
 
         $actualTelecoms = $fhirPatientResource->getTelecom();
         $this->assertFhirPatientTelecom('phone', 'home', $sourcePatientRecord['phone_home'], $actualTelecoms);
@@ -163,16 +176,16 @@ class FhirPatientServiceMappingTest extends TestCase
      * @param $telecomUse - The telecom use to match
      * @return matching entries (array)
      */
-    private function findTelecomEntry($fhirPatientResource, $telecomSystem, $telecomUse)
+    private function findTelecomEntry(FHIRPatient $fhirPatientResource, $telecomSystem, $telecomUse)
     {
         $matchingEntries = array();
 
-        if (!isset($fhirPatientResource['telecom'])) {
+        if (empty($fhirPatientResource->getTelecom())) {
             return $matchingEntries;
         }
 
-        foreach ($fhirPatientResource['telecom'] as $index => $telecomEntry) {
-            if ($telecomEntry['system'] == $telecomSystem && $telecomEntry['use'] == $telecomUse) {
+        foreach ($fhirPatientResource->getTelecom() as $index => $telecomEntry) {
+            if ($telecomEntry->getSystem() == $telecomSystem && $telecomEntry->getUse() == $telecomUse) {
                 array_push($matchingEntries, $telecomEntry);
             }
         }
@@ -185,22 +198,21 @@ class FhirPatientServiceMappingTest extends TestCase
      * @param $fhirCodeType The code to lookup
      * @return the code value if found, otherwise null
      */
-    private function findIdentiferCodeValue($fhirPatientResource, $fhirCodeType)
+    private function findIdentiferCodeValue(FHIRPatient $fhirPatientResource, $fhirCodeType): ?string
     {
         $codeValue = null;
 
-        foreach ($fhirPatientResource['identifier'] as $index => $identifier) {
-            if (!isset($identifier['type']['coding'][0])) {
+        foreach ($fhirPatientResource->getIdentifier() as $index => $identifier) {
+            if (empty($identifier->getType()->getCoding())) {
                 continue;
             }
-
-            $identifierCodeType = $identifier['type']['coding'][0]['code'];
+            $identifierCodeType = $identifier->getType()->getCoding()[0]->getCode();
             if ($identifierCodeType === $fhirCodeType) {
-                $codeValue = $identifier['value'];
+                $codeValue = $identifier->getValue();
                 break;
             }
         }
-        return $codeValue;
+        return (string)$codeValue;
     }
     /**
      * @covers ::parseFhirResource
@@ -209,25 +221,25 @@ class FhirPatientServiceMappingTest extends TestCase
     {
         $actualResult = $this->fhirPatientService->parseFhirResource($this->fhirPatientFixture);
 
-        $id = $this->fhirPatientFixture['id'];
+        $id = $this->fhirPatientFixture->getId();
         $this->assertEquals($id, $actualResult['uuid']);
 
-        $title = $this->fhirPatientFixture['name'][0]['prefix'][0];
+        $title = $this->fhirPatientFixture->getName()[0]->getPrefix()[0];
         $this->assertEquals($title, $actualResult['title']);
 
-        $fname = $this->fhirPatientFixture['name'][0]['given'][0];
+        $fname = $this->fhirPatientFixture->getName()[0]->getGiven()[0];
         $this->assertEquals($fname, $actualResult['fname']);
 
-        $mname = $this->fhirPatientFixture['name'][0]['given'][1];
+        $mname = $this->fhirPatientFixture->getName()[0]->getGiven()[1];
         $this->assertEquals($mname, $actualResult['mname']);
 
-        $lname = $this->fhirPatientFixture['name'][0]['family'];
+        $lname = $this->fhirPatientFixture->getName()[0]->getFamily();
         $this->assertEquals($lname, $actualResult['lname']);
 
-        $dob = $this->fhirPatientFixture['birthDate'];
+        $dob = $this->fhirPatientFixture->getBirthDate();
         $this->assertEquals($dob, $actualResult['DOB']);
 
-        $sex = $this->fhirPatientFixture['gender'];
+        $sex = $this->fhirPatientFixture->getGender();
         $this->assertEquals($sex, $actualResult['sex']);
 
         $ss = $this->findIdentiferCodeValue($this->fhirPatientFixture, 'SS');
@@ -236,34 +248,34 @@ class FhirPatientServiceMappingTest extends TestCase
         $pubpid = $this->findIdentiferCodeValue($this->fhirPatientFixture, 'PT');
         $this->assertEquals($pubpid, $actualResult['pubpid']);
 
-        $address = $this->fhirPatientFixture['address'][0];
+        $address = $this->fhirPatientFixture->getAddress()[0];
 
-        $street = $address['line'][0];
+        $street = $address->getLine()[0];
         $this->assertEquals($street, $actualResult['street']);
 
-        $city = $address['city'];
+        $city = $address->getCity();
         $this->assertEquals($city, $actualResult['city']);
 
-        $state = $address['state'];
+        $state = $address->getState();
         $this->assertEquals($state, $actualResult['state']);
 
-        $postalCode = $address['postalCode'];
+        $postalCode = $address->getPostalCode();
         $this->assertEquals($postalCode, $actualResult['postal_code']);
 
         $phoneCell = $this->findTelecomEntry($this->fhirPatientFixture, 'phone', 'mobile');
         $this->assertEquals(1, count($phoneCell));
-        $this->assertEquals($phoneCell[0]['value'], $actualResult['phone_cell']);
+        $this->assertEquals($phoneCell[0]->getValue(), $actualResult['phone_cell']);
 
         $phoneHome = $this->findTelecomEntry($this->fhirPatientFixture, 'phone', 'home');
         $this->assertEquals(1, count($phoneHome));
-        $this->assertEquals($phoneHome[0]['value'], $actualResult['phone_home']);
+        $this->assertEquals($phoneHome[0]->getValue(), $actualResult['phone_home']);
 
         $phoneBiz = $this->findTelecomEntry($this->fhirPatientFixture, 'phone', 'work');
         $this->assertEquals(1, count($phoneBiz));
-        $this->assertEquals($phoneBiz[0]['value'], $actualResult['phone_biz']);
+        $this->assertEquals($phoneBiz[0]->getValue(), $actualResult['phone_biz']);
 
         $email = $this->findTelecomEntry($this->fhirPatientFixture, 'email', 'home');
         $this->assertEquals(1, count($email));
-        $this->assertEquals($email[0]['value'], $actualResult['email']);
+        $this->assertEquals($email[0]->getValue(), $actualResult['email']);
     }
 }
