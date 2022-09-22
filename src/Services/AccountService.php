@@ -154,7 +154,7 @@ class AccountService
 
         // get portal_onetime and stick it into the email
         if (!(validEmail($GLOBALS['patient_reminder_sender_email']))) {
-            return false;
+            // return false;
         }
         // TODO: Make this base url dynamic
         $one_time_url = 'https://portal.feelwelltelehealth.com/password_reset?otc='.$one_time;

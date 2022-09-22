@@ -238,7 +238,7 @@ class UuidRegistry
         }
     }
 
-    private function createMissingUuids()
+    public function createMissingUuids()
     {
         try {
             sqlBeginTrans();

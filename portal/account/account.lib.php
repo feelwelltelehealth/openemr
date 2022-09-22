@@ -596,7 +596,9 @@ function doCredentialsAuthorized($pid)
             $newpd['email_direct'] = $newpd['email'];
         }
     }
-
+    
+    return true;
+    // Ignore this
     $message = messageCreate($uname, $pin, $encoded_link);
 
     $mail = new MyMailer();

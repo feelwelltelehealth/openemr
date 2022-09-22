@@ -174,12 +174,8 @@ class AppointmentService extends BaseService
                        pce.pc_duration,
               	       pce.pc_facility,
                        pce.pc_billing_location,
-<<<<<<< HEAD
-                       pce.pc_hometext,
-=======
                        pce.pc_catid,
                        pce.pc_room,
->>>>>>> 56c81eaa9c98a4cb7e9fdeabc139d13e19aa916e
                        f1.name as facility_name,
                        f2.name as billing_location_name
                        FROM openemr_postcalendar_events as pce
@@ -207,7 +203,6 @@ class AppointmentService extends BaseService
 
         $sql  = " INSERT INTO openemr_postcalendar_events SET";
         $sql .= "     pc_pid=?,";
-        $sql .= "     pc_aid=?,";
         $sql .= "     pc_catid=?,";
         $sql .= "     pc_title=?,";
         $sql .= "     pc_duration=?,";
@@ -227,7 +222,6 @@ class AppointmentService extends BaseService
             $sql,
             array(
                 $pid,
-                $data["pc_aid"],
                 $data["pc_catid"],
                 $data["pc_title"],
                 $data["pc_duration"],
